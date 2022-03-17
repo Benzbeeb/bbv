@@ -1,8 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    coin, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, QueryRequest, Reply,
-    ReplyOn, Response, StdResult, SubMsg, Uint128, WasmMsg, WasmQuery,
+    coin, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, QuerierWrapper,
+    QueryRequest, Reply, ReplyOn, Response, StdResult, SubMsg, Uint128, WasmMsg, WasmQuery,
 };
 use cw2::set_contract_version;
 use cw20::Cw20ExecuteMsg;
@@ -123,6 +123,102 @@ pub fn callback_redeem(deps: DepsMut) -> Result<Response, ContractError> {
     }))
 }
 
+pub fn swap_all_to_ust(
+    querier: &QuerierWrapper,
+    asset: AstroportAsset,
+    astroport_factory_address: Addr,
+) -> StdResult<Vec<CosmosMsg>> {
+    let mut messages = vec![];
+    match asset.clone().info {
+        AstroportAssetInfo::Token { contract_addr } => {
+            let asset_infos = [
+                AstroportAssetInfo::NativeToken {
+                    denom: "uusd".to_string(),
+                },
+                AstroportAssetInfo::Token { contract_addr },
+            ];
+
+            // Load Astroport pair info
+            let pair_info: PairInfo =
+                query_pair_info(querier, astroport_factory_address, &asset_infos)?;
+
+            let message = CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: asset.info.to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Send {
+                    contract: pair_info.contract_addr.to_string(),
+                    amount: asset.amount,
+                    msg: to_binary(&AstroportCw20HookMsg::Swap {
+                        max_spread: None,
+                        belief_price: None,
+                        to: None,
+                    })?,
+                })?,
+                funds: vec![],
+            });
+            messages.push(message)
+        }
+        AstroportAssetInfo::NativeToken { denom } => {
+            if denom != "uusd" {
+                let asset_infos = [
+                    AstroportAssetInfo::NativeToken {
+                        denom: "uusd".to_string(),
+                    },
+                    AstroportAssetInfo::NativeToken {
+                        denom: denom.clone(),
+                    },
+                ];
+
+                // Load Astroport pair info
+                let pair_info: PairInfo =
+                    query_pair_info(querier, astroport_factory_address.clone(), &asset_infos)?;
+
+                let message = CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: pair_info.contract_addr.to_string(),
+                    msg: to_binary(&AstroportExecuteMsg::Swap {
+                        offer_asset: asset.clone(),
+                        belief_price: None,
+                        max_spread: None,
+                        to: None,
+                    })?,
+                    funds: vec![coin(asset.amount.u128(), denom)],
+                });
+                messages.push(message)
+            }
+        }
+    }
+
+    Ok(messages)
+}
+
+pub fn repay_and_take_profit(
+    querier: &QuerierWrapper,
+    loan_amount: Uint128,
+    contract_address: Addr,
+    ust_vault_address: Addr,
+) -> StdResult<Vec<CosmosMsg>> {
+    let mut messages = vec![];
+
+    let return_amount = loan_amount.checked_div(Uint128::from(99u128)).unwrap() + loan_amount;
+
+    messages.push(
+        Asset {
+            info: AssetInfo::NativeToken {
+                denom: "uusd".to_string(),
+            },
+            amount: return_amount,
+        }
+        .into_msg(querier, ust_vault_address)?,
+    );
+
+    messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: contract_address.to_string(),
+        msg: to_binary(&ExecuteMsg::_UserProfit {})?,
+        funds: vec![],
+    }));
+
+    Ok(messages)
+}
+
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
@@ -158,87 +254,18 @@ pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractEr
                     continue;
                 }
 
-                match asset.clone().info {
-                    AstroportAssetInfo::Token { contract_addr } => {
-                        let asset_infos = [
-                            AstroportAssetInfo::NativeToken {
-                                denom: "uusd".to_string(),
-                            },
-                            AstroportAssetInfo::Token { contract_addr },
-                        ];
-
-                        // Load Astroport pair info
-                        let pair_info: PairInfo = query_pair_info(
-                            &deps.querier,
-                            state.astroport_factory_address.clone(),
-                            &asset_infos,
-                        )?;
-
-                        let message = CosmosMsg::Wasm(WasmMsg::Execute {
-                            contract_addr: asset.info.to_string(),
-                            msg: to_binary(&Cw20ExecuteMsg::Send {
-                                contract: pair_info.contract_addr.to_string(),
-                                amount: asset.amount,
-                                msg: to_binary(&AstroportCw20HookMsg::Swap {
-                                    max_spread: None,
-                                    belief_price: None,
-                                    to: None,
-                                })?,
-                            })?,
-                            funds: vec![],
-                        });
-                        messages.push(message)
-                    }
-                    AstroportAssetInfo::NativeToken { denom } => {
-                        if denom != "uusd" {
-                            let asset_infos = [
-                                AstroportAssetInfo::NativeToken {
-                                    denom: "uusd".to_string(),
-                                },
-                                AstroportAssetInfo::NativeToken {
-                                    denom: denom.clone(),
-                                },
-                            ];
-
-                            // Load Astroport pair info
-                            let pair_info: PairInfo = query_pair_info(
-                                &deps.querier,
-                                state.astroport_factory_address.clone(),
-                                &asset_infos,
-                            )?;
-
-                            let message = CosmosMsg::Wasm(WasmMsg::Execute {
-                                contract_addr: pair_info.contract_addr.to_string(),
-                                msg: to_binary(&AstroportExecuteMsg::Swap {
-                                    offer_asset: asset.clone(),
-                                    belief_price: None,
-                                    max_spread: None,
-                                    to: None,
-                                })?,
-                                funds: vec![coin(asset.amount.u128(), denom)],
-                            });
-                            messages.push(message)
-                        }
-                    }
-                }
+                messages.extend_from_slice(&swap_all_to_ust(
+                    &deps.querier,
+                    asset,
+                    state.astroport_factory_address.clone(),
+                )?)
             }
-            let loan_amount = state.loan_amount.unwrap();
-            let return_amount =
-                loan_amount.checked_div(Uint128::from(99u128)).unwrap() + loan_amount;
-            messages.push(
-                Asset {
-                    info: AssetInfo::NativeToken {
-                        denom: "uusd".to_string(),
-                    },
-                    amount: return_amount,
-                }
-                .into_msg(&deps.querier, state.ust_vault_address)?,
-            );
-            messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: env.contract.address.to_string(),
-                msg: to_binary(&ExecuteMsg::_UserProfit {})?,
-                funds: vec![],
-            }))
+            messages.extend_from_slice(&repay_and_take_profit(
+                &deps.querier,
+                state.loan_amount.unwrap(),
+                env.contract.address,
+                state.ust_vault_address,
+            )?);
         }
         _ => return Err(ContractError::Unauthorized {}),
     }
