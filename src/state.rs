@@ -6,7 +6,7 @@ use cw_storage_plus::Item;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct State {
-    pub ust_vault_address: Addr,
+    pub vault_address: Addr,
     pub cluster_address: Addr,
     pub incentive_addres: Addr,
     pub astroport_factory_address: Addr,
@@ -19,4 +19,4 @@ pub struct LoanInfo {
 }
 
 pub const STATE: Item<State> = Item::new("state");
-pub const LOAN_INFO: Item<LoanInfo> = Item::new("state");
+pub const LOAN_INFO: Item<LoanInfo> = Item::new("loan_info");

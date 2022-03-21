@@ -8,7 +8,7 @@ use astroport::asset::Asset;
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct InstantiateMsg {
-    pub ust_vault_address: String,
+    pub vault_address: String,
     pub cluster_address: String,
     pub incentive_address: String,
     pub astroport_factory_address: String,
@@ -19,8 +19,10 @@ pub struct InstantiateMsg {
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
     FlashLoan { amount: Uint128 },
-    _CallbackRedeem {},
+    CallbackRedeem {},
     _UserProfit {},
+    CallbackCreate {},
+    ArbCreate {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -30,6 +32,11 @@ pub enum IncentivesMsg {
         cluster_contract: String,
         asset: Asset,
         min_cluster: Option<Uint128>,
+    },
+    ArbClusterCreate {
+        cluster_contract: String,
+        assets: Vec<Asset>,
+        min_ust: Option<Uint128>,
     },
 }
 
@@ -43,7 +50,7 @@ pub enum QueryMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct UstVaultAddressResponse {
-    pub ust_vault_address: Addr,
+    pub vault_address: Addr,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
