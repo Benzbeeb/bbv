@@ -37,7 +37,6 @@ pub fn instantiate(
 ) -> Result<Response, ContractError> {
     let state = State {
         vault_address: deps.api.addr_validate(msg.vault_address.as_str())?,
-        cluster_address: deps.api.addr_validate(msg.cluster_address.as_str())?,
         incentive_addres: deps.api.addr_validate(msg.incentive_address.as_str())?,
         astroport_factory_address: deps
             .api
@@ -56,7 +55,10 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::FlashLoan { amount } => try_flash_loan(deps, amount, info),
+        ExecuteMsg::FlashLoan {
+            amount,
+            cluster_address,
+        } => try_flash_loan(deps, amount, info, cluster_address),
         ExecuteMsg::CallbackRedeem {} => callback_redeem(deps),
         ExecuteMsg::_UserProfit {} => _user_profit(deps, env),
         ExecuteMsg::CallbackCreate {} => callback_create(deps, env),
@@ -68,13 +70,16 @@ pub fn try_flash_loan(
     deps: DepsMut,
     amount: Uint128,
     info: MessageInfo,
+    cluster_address_raw: String,
 ) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
+    let cluster_address = deps.api.addr_validate(cluster_address_raw.as_str())?;
     LOAN_INFO.save(
         deps.storage,
         &LoanInfo {
             user_address: info.sender,
             amount,
+            cluster_address: cluster_address.clone(),
         },
     )?;
 
@@ -85,7 +90,7 @@ pub fn try_flash_loan(
         amount: Uint128::from(amount),
     };
 
-    let cluster_state = get_cluster_state(deps.as_ref(), &state.cluster_address)?;
+    let cluster_state = get_cluster_state(deps.as_ref(), &cluster_address)?;
 
     let supply: Uint128 = cluster_state.outstanding_balance_tokens;
     let net_asset_val: Uint128 = cluster_state
@@ -157,7 +162,7 @@ pub fn callback_redeem(deps: DepsMut) -> Result<Response, ContractError> {
         contract_addr: state.incentive_addres.to_string(),
         funds: vec![coin(loan_info.amount.u128(), "uusd".to_string())],
         msg: to_binary(&IncentivesMsg::ArbClusterRedeem {
-            cluster_contract: state.cluster_address.to_string(),
+            cluster_contract: loan_info.cluster_address.to_string(),
             asset,
             min_cluster: Some(Uint128::from(1u128)),
         })?,
@@ -175,7 +180,7 @@ pub fn callback_create(deps: DepsMut, env: Env) -> Result<Response, ContractErro
     let state = STATE.load(deps.storage)?;
     let loan_info = LOAN_INFO.load(deps.storage)?;
 
-    let cluster_state = get_cluster_state(deps.as_ref(), &state.cluster_address)?;
+    let cluster_state = get_cluster_state(deps.as_ref(), &loan_info.cluster_address)?;
     let total_asset_amount: Uint128 = cluster_state.clone().inv.iter().sum();
 
     let asset_amounts = cluster_state
@@ -220,7 +225,7 @@ pub fn arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
     let loan_info = LOAN_INFO.load(deps.storage)?;
 
-    let assets: Vec<AstroportAsset> = get_cluster_state(deps.as_ref(), &state.cluster_address)?
+    let assets: Vec<AstroportAsset> = get_cluster_state(deps.as_ref(), &loan_info.cluster_address)?
         .target
         .iter()
         .map(|asset| AstroportAsset {
@@ -266,7 +271,7 @@ pub fn arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: state.incentive_addres.to_string(),
         msg: to_binary(&IncentivesMsg::ArbClusterCreate {
-            cluster_contract: state.cluster_address.to_string(),
+            cluster_contract: loan_info.cluster_address.to_string(),
             assets,
             min_ust: Some(Uint128::from(1u128)),
         })?,
@@ -367,7 +372,7 @@ pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractEr
     match msg.id {
         1 => {
             let asset_infos: Vec<AstroportAssetInfo> =
-                get_cluster_state(deps.as_ref(), &state.cluster_address)?
+                get_cluster_state(deps.as_ref(), &loan_info.cluster_address)?
                     .target
                     .iter()
                     .map(|x| x.info.clone())

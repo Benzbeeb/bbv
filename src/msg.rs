@@ -9,7 +9,6 @@ use astroport::asset::Asset;
 #[serde(rename_all = "snake_case")]
 pub struct InstantiateMsg {
     pub vault_address: String,
-    pub cluster_address: String,
     pub incentive_address: String,
     pub astroport_factory_address: String,
 }
@@ -18,7 +17,10 @@ pub struct InstantiateMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
-    FlashLoan { amount: Uint128 },
+    FlashLoan {
+        amount: Uint128,
+        cluster_address: String,
+    },
     CallbackRedeem {},
     _UserProfit {},
     CallbackCreate {},

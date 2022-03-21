@@ -7,13 +7,13 @@ use cw_storage_plus::Item;
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct State {
     pub vault_address: Addr,
-    pub cluster_address: Addr,
     pub incentive_addres: Addr,
     pub astroport_factory_address: Addr,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct LoanInfo {
+    pub cluster_address: Addr,
     pub user_address: Addr,
     pub amount: Uint128,
 }
