@@ -15,12 +15,14 @@ use crate::msg::{
 };
 use crate::state::{LoanInfo, State, LOAN_INFO, STATE};
 
-use astroport::asset::{Asset as AstroportAsset, AssetInfo as AstroportAssetInfo, PairInfo};
+use astroport::asset::{Asset as AstroportAsset, AssetInfo as AstroportAssetInfo};
 use astroport::pair::{Cw20HookMsg as AstroportCw20HookMsg, ExecuteMsg as AstroportExecuteMsg};
 use astroport::querier::{query_balance, query_pair_info};
 use terraswap::asset::{Asset, AssetInfo};
 use white_whale::ust_vault::msg::ExecuteMsg as WhiteWhaleExecuteMsg;
 use white_whale::ust_vault::msg::FlashLoanPayload;
+
+use std::str::FromStr;
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:bbv";
@@ -83,18 +85,62 @@ pub fn try_flash_loan(
         amount: Uint128::from(amount),
     };
 
-    Ok(
-        Response::new().add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+    let cluster_state = get_cluster_state(deps.as_ref(), &state.cluster_address)?;
+
+    let supply: Uint128 = cluster_state.outstanding_balance_tokens;
+    let net_asset_val: Uint128 = cluster_state
+        .inv
+        .iter()
+        .zip(cluster_state.prices.iter())
+        .map(|(i, p)| (Decimal::from_str(p.as_str()).unwrap()) * i.clone())
+        .sum::<Uint128>();
+
+    let intrinsic: Decimal = Decimal::from_ratio(net_asset_val, supply);
+
+    let pool_info = query_pair_info(
+        &deps.querier,
+        state.astroport_factory_address,
+        &[
+            AstroportAssetInfo::NativeToken {
+                denom: "uusd".to_string(),
+            },
+            AstroportAssetInfo::Token {
+                contract_addr: deps
+                    .api
+                    .addr_validate(cluster_state.cluster_token.as_str())?,
+            },
+        ],
+    )?;
+
+    let assets = pool_info.query_pools(&deps.querier, pool_info.contract_addr.clone())?;
+    let market = match assets.clone()[0].info {
+        AstroportAssetInfo::NativeToken { .. } => {
+            Decimal::from_ratio(assets[0].amount, assets[1].amount)
+        }
+        AstroportAssetInfo::Token { .. } => Decimal::from_ratio(assets[1].amount, assets[0].amount),
+    };
+
+    let callback = if market < intrinsic {
+        ExecuteMsg::CallbackRedeem {}
+    } else {
+        ExecuteMsg::CallbackCreate {}
+    };
+
+    Ok(Response::new()
+        .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: state.vault_address.to_string(),
             msg: to_binary(&WhiteWhaleExecuteMsg::FlashLoan {
                 payload: FlashLoanPayload {
                     requested_asset,
-                    callback: to_binary(&ExecuteMsg::CallbackCreate {})?,
+                    callback: to_binary(&callback)?,
                 },
             })?,
             funds: vec![],
-        })),
-    )
+        }))
+        .add_attributes(vec![
+            attr("market", market.to_string()),
+            attr("intrinsic", intrinsic.to_string()),
+        ]))
 }
 
 pub fn callback_redeem(deps: DepsMut) -> Result<Response, ContractError> {
@@ -130,41 +176,22 @@ pub fn callback_create(deps: DepsMut, env: Env) -> Result<Response, ContractErro
     let loan_info = LOAN_INFO.load(deps.storage)?;
 
     let cluster_state = get_cluster_state(deps.as_ref(), &state.cluster_address)?;
-    let supply: Uint128 = cluster_state.clone().inv.iter().sum();
+    let total_asset_amount: Uint128 = cluster_state.clone().inv.iter().sum();
 
     let asset_amounts = cluster_state
         .inv
         .iter()
-        .map(|&inv| Decimal::from_ratio(inv, supply) * (loan_info.amount.clone()));
+        .map(|&inv| Decimal::from_ratio(inv, total_asset_amount) * (loan_info.amount.clone()));
 
     let target_infos = cluster_state.target.iter().map(|x| x.info.clone());
     let mut messages: Vec<CosmosMsg> = vec![];
 
-    let mut attrs = vec![];
-
     for (info, amount) in target_infos.zip(asset_amounts) {
-        if matches!(info.clone(),AstroportAssetInfo::NativeToken { denom } if denom == "uusd" ) {
+        if matches!(info.clone(),AstroportAssetInfo::NativeToken { denom } if denom == "uusd" )
+            || amount.is_zero()
+        {
             continue;
         }
-
-        let key = match info.clone() {
-            AstroportAssetInfo::NativeToken { denom } => denom,
-            AstroportAssetInfo::Token { contract_addr } => contract_addr.to_string(),
-        };
-        attrs.push(attr(key, amount));
-        let pair_contract = query_pair_info(
-            &deps.querier,
-            state.astroport_factory_address.clone(),
-            &[
-                AstroportAssetInfo::NativeToken {
-                    denom: "uusd".to_string(),
-                },
-                info.clone(),
-            ],
-        )?
-        .contract_addr
-        .to_string();
-        attrs.push(attr("pool_ja", pair_contract));
 
         messages.push(swap_to(
             &deps.querier,
@@ -185,15 +212,13 @@ pub fn callback_create(deps: DepsMut, env: Env) -> Result<Response, ContractErro
         msg: to_binary(&ExecuteMsg::ArbCreate {})?,
     }));
 
-    Ok(Response::new().add_messages(messages).add_attributes(attrs))
+    Ok(Response::new().add_messages(messages))
 }
 
 pub fn arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let mut messages: Vec<CosmosMsg> = vec![];
     let state = STATE.load(deps.storage)?;
     let loan_info = LOAN_INFO.load(deps.storage)?;
-
-    let mut attrs = vec![];
 
     let assets: Vec<AstroportAsset> = get_cluster_state(deps.as_ref(), &state.cluster_address)?
         .target
@@ -206,10 +231,6 @@ pub fn arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
                 .unwrap(),
         })
         .collect();
-
-    for asset in assets.clone() {
-        attrs.push(attr("asset_ha", asset.to_string()));
-    }
 
     let allowances: Vec<CosmosMsg> = assets
         .clone()
@@ -231,6 +252,8 @@ pub fn arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
         })
         .collect();
 
+    messages.extend_from_slice(&allowances);
+
     let funds: Vec<Coin> = assets
         .clone()
         .iter()
@@ -239,8 +262,6 @@ pub fn arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
             AstroportAssetInfo::Token { .. } => None,
         })
         .collect();
-
-    messages.extend_from_slice(&allowances);
 
     messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: state.incentive_addres.to_string(),
@@ -259,7 +280,7 @@ pub fn arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
         state.vault_address,
     )?);
 
-    Ok(Response::new().add_messages(messages).add_attributes(attrs))
+    Ok(Response::new().add_messages(messages))
 }
 
 pub fn swap_to(
@@ -341,7 +362,6 @@ pub fn repay_and_take_profit(
 pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
     let loan_info = LOAN_INFO.load(deps.storage)?;
-
     let mut messages = vec![];
 
     match msg.id {
