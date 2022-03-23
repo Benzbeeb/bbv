@@ -55,10 +55,7 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::FlashLoan {
-            amount,
-            cluster_address,
-        } => try_flash_loan(deps, amount, info, cluster_address),
+        ExecuteMsg::FlashLoan { cluster_address } => try_flash_loan(deps, info, cluster_address),
         ExecuteMsg::CallbackRedeem {} => callback_redeem(deps),
         ExecuteMsg::_UserProfit {} => _user_profit(deps, env),
         ExecuteMsg::CallbackCreate {} => callback_create(deps, env),
@@ -68,28 +65,11 @@ pub fn execute(
 
 pub fn try_flash_loan(
     deps: DepsMut,
-    amount: Uint128,
     info: MessageInfo,
     cluster_address_raw: String,
 ) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
     let cluster_address = deps.api.addr_validate(cluster_address_raw.as_str())?;
-    LOAN_INFO.save(
-        deps.storage,
-        &LoanInfo {
-            user_address: info.sender,
-            amount,
-            cluster_address: cluster_address.clone(),
-        },
-    )?;
-
-    let requested_asset = Asset {
-        info: AssetInfo::NativeToken {
-            denom: "uusd".to_string(),
-        },
-        amount: Uint128::from(amount),
-    };
-
     let cluster_state = get_cluster_state(deps.as_ref(), &cluster_address)?;
 
     let supply: Uint128 = cluster_state.outstanding_balance_tokens;
@@ -118,17 +98,49 @@ pub fn try_flash_loan(
     )?;
 
     let assets = pool_info.query_pools(&deps.querier, pool_info.contract_addr.clone())?;
-    let market = match assets.clone()[0].info {
-        AstroportAssetInfo::NativeToken { .. } => {
-            Decimal::from_ratio(assets[0].amount, assets[1].amount)
-        }
-        AstroportAssetInfo::Token { .. } => Decimal::from_ratio(assets[1].amount, assets[0].amount),
+
+    let (ust_amt, ct_amt) = match assets.clone()[0].info {
+        AstroportAssetInfo::NativeToken { .. } => (assets[0].amount, assets[1].amount),
+        AstroportAssetInfo::Token { .. } => (assets[1].amount, assets[0].amount),
     };
 
-    let callback = if market < intrinsic {
-        ExecuteMsg::CallbackRedeem {}
+    let market = Decimal::from_ratio(ust_amt, ct_amt);
+
+    let (callback, amount) = if market < intrinsic {
+        // let x = ust_amt * ct_amt * intrinsic;
+        // let amount = Decimal::sqrt(&Decimal::from_ratio(x, Uint128::from(1u128)))
+        //     * Uint128::from(1u128)
+        //     - ust_amt;
+        (ExecuteMsg::CallbackRedeem {}, Uint128::from(10000000u128))
     } else {
-        ExecuteMsg::CallbackCreate {}
+        let sqrt_ct = Decimal::sqrt(&Decimal::from_ratio(ct_amt, Uint128::from(1u128)))
+            * Uint128::from(1u128);
+        let sqrt_ust = Decimal::sqrt(&Decimal::from_ratio(ust_amt, Uint128::from(1u128)))
+            * Uint128::from(1u128);
+        let sqrt_market = Decimal::sqrt(&market) * Uint128::from(1u128);
+
+        let expect_ct = Decimal::from_ratio(sqrt_ct * sqrt_ust, sqrt_market - ust_amt)
+            * Uint128::from(1u128)
+            - ust_amt;
+
+        let amount = expect_ct * intrinsic;
+        (ExecuteMsg::CallbackCreate {}, expect_ct)
+    };
+
+    LOAN_INFO.save(
+        deps.storage,
+        &LoanInfo {
+            user_address: info.sender,
+            amount,
+            cluster_address: cluster_address.clone(),
+        },
+    )?;
+
+    let requested_asset = Asset {
+        info: AssetInfo::NativeToken {
+            denom: "uusd".to_string(),
+        },
+        amount,
     };
 
     Ok(Response::new()
@@ -145,6 +157,7 @@ pub fn try_flash_loan(
         .add_attributes(vec![
             attr("market", market.to_string()),
             attr("intrinsic", intrinsic.to_string()),
+            attr("loan_amount", amount.to_string()),
         ]))
 }
 

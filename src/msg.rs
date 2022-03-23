@@ -17,10 +17,7 @@ pub struct InstantiateMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
-    FlashLoan {
-        amount: Uint128,
-        cluster_address: String,
-    },
+    FlashLoan { cluster_address: String },
     CallbackRedeem {},
     _UserProfit {},
     CallbackCreate {},
