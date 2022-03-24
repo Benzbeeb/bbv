@@ -2,8 +2,8 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     attr, coin, to_binary, Addr, Binary, Coin, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo,
-    QuerierWrapper, QueryRequest, Reply, ReplyOn, Response, StdResult, SubMsg, Uint128, Uint256,
-    WasmMsg, WasmQuery,
+    QuerierWrapper, QueryRequest, Reply, ReplyOn, Response, StdResult, SubMsg, Uint128, WasmMsg,
+    WasmQuery,
 };
 use cw2::set_contract_version;
 use cw20::Cw20ExecuteMsg;
@@ -27,6 +27,8 @@ use std::str::FromStr;
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:bbv";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
+const TEN4: Uint128 = Uint128::new(10_000u128);
+const TEN12: Uint128 = Uint128::new(1_000_000_000_000u128);
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
@@ -106,30 +108,15 @@ pub fn try_flash_loan(
 
     let market = Decimal::from_ratio(ust_amt, ct_amt);
 
-    // let mut attrs = vec![];
-
     let (callback, amount) = if market < intrinsic {
-        // let x = ust_amt * ct_amt * intrinsic;
-        // let amount = Decimal::sqrt(&Decimal::from_ratio(x, Uint128::from(1u128)))
-        //     * Uint128::from(1u128)
-        //     - ust_amt;
-        (
-            ExecuteMsg::CallbackRedeem {},
-            beeb3(ust_amt, ct_amt, intrinsic),
-        )
+        let front = beeb(ust_amt, ct_amt, intrinsic, TEN4);
+        let amount = (front) / TEN12 - ust_amt;
+        (ExecuteMsg::CallbackRedeem {}, amount)
     } else {
-        // let TEN4: Uint128 = Uint128::new(10_000u128);
-        // let TEN12 = TEN4 * TEN4 * TEN4;
-        // let front = beeb(ust_amt, ct_amt, intrinsic, TEN4);
-        // let back = ct_amt * TEN12 * intrinsic;
-        // let amount = (front - back) / TEN12;
-        // attrs.push(attr("front", front));
-        // let back = intrinsic.checked_mul(TEN9 * ct_amt).unwrap();
-        // let amount = Decimal::from_ratio(front - back, TEN9) * ONE;
-        (
-            ExecuteMsg::CallbackCreate {},
-            beeb2(ust_amt, ct_amt, intrinsic),
-        )
+        let front = beeb(ust_amt, ct_amt, intrinsic, TEN4);
+        let back = ct_amt * TEN12 * intrinsic;
+        let amount = (front - back) / TEN12;
+        (ExecuteMsg::CallbackCreate {}, amount)
     };
 
     LOAN_INFO.save(
@@ -473,41 +460,9 @@ pub fn get_cluster_state(deps: Deps, cluster: &Addr) -> StdResult<ClusterStateRe
 }
 
 pub fn beeb(ust_amt: Uint128, ct_amt: Uint128, intrinsic: Decimal, multiplier: Uint128) -> Uint128 {
-    let ONE: Uint256 = Uint256::from_str("1").unwrap();
-    // let TEN4: Uint128= Uint128::new(10_000u128);
     let intrinsic_sqrt = intrinsic.sqrt() * multiplier;
     let ct_sqrt = Decimal::from_str(&ct_amt.to_string()).unwrap().sqrt() * multiplier;
     let ust_sqrt = Decimal::from_str(&ust_amt.to_string()).unwrap().sqrt() * multiplier;
 
     intrinsic_sqrt * ct_sqrt * ust_sqrt
-}
-
-pub fn beeb2(ust_amt: Uint128, ct_amt: Uint128, intrinsic: Decimal) -> Uint128 {
-    let TEN4: Uint128 = Uint128::new(10_000u128);
-    let TEN12 = TEN4 * TEN4 * TEN4;
-    let front = beeb(ust_amt, ct_amt, intrinsic, TEN4);
-    let back = ct_amt * TEN12 * intrinsic;
-    let amount = (front - back) / TEN12;
-    amount
-}
-
-pub fn beeb3(ust_amt: Uint128, ct_amt: Uint128, intrinsic: Decimal) -> Uint128 {
-    let TEN4: Uint128 = Uint128::new(10_000u128);
-    let TEN12 = TEN4 * TEN4 * TEN4;
-    let front = beeb(ust_amt, ct_amt, intrinsic, TEN4);
-    // let back = ct_amt * TEN12 * intrinsic;
-    let amount = (front) / TEN12 - ust_amt;
-    amount
-}
-
-#[test]
-fn beebb() {
-    let market = Decimal::from_str("13.476340280756806111").unwrap();
-    let intrinsic = Decimal::from_str("13.470158816734021967").unwrap();
-    let ust_amount = Uint128::from_str("181727085945").unwrap();
-    let ct_amount = Uint128::from_str("13484898879").unwrap();
-
-    let TEN4 = Uint128::new(10_000u128);
-
-    println!("{:?}", beeb2(ust_amount, ct_amount, intrinsic));
 }
