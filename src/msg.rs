@@ -1,4 +1,4 @@
-use cosmwasm_std::{Addr, Uint128};
+use cosmwasm_std::{Addr, Decimal, Uint128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +31,14 @@ pub enum ExecuteMsg {
         astroport_factory_address: Option<String>,
         owner_address: Option<String>,
     },
+    WithdrawNative {
+        send_to: String,
+        denom: String,
+    },
+    WithdrawToken {
+        send_to: String,
+        contract_address: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -53,12 +61,24 @@ pub enum IncentivesMsg {
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     UstVaultAddress {},
+    EstimateArbitrage { cluster_address: String },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct UstVaultAddressResponse {
     pub vault_address: Addr,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct EstimateArbitrageResponse {
+    pub market_price: Decimal,
+    pub intrinsic_price: Decimal,
+    pub arbitrage_cost: Uint128,
+    pub inv: Vec<Uint128>,
+    pub target: Vec<Asset>,
+    pub prices: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

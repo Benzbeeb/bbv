@@ -1,7 +1,7 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    attr, coin, to_binary, Addr, Binary, Coin, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo,
+    attr, coin, to_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo,
     QuerierWrapper, QueryRequest, Reply, ReplyOn, Response, StdResult, SubMsg, Uint128, WasmMsg,
     WasmQuery,
 };
@@ -10,14 +10,14 @@ use cw20::Cw20ExecuteMsg;
 
 use crate::error::ContractError;
 use crate::msg::{
-    ClusterStateResponse, ExecuteMsg, IncentivesMsg, InstantiateMsg, QueryMsg, QueryMsgAstroPort,
-    UstVaultAddressResponse,
+    ClusterStateResponse, EstimateArbitrageResponse, ExecuteMsg, IncentivesMsg, InstantiateMsg,
+    QueryMsg, QueryMsgAstroPort, UstVaultAddressResponse,
 };
 use crate::state::{LoanInfo, State, LOAN_INFO, STATE};
 
 use astroport::asset::{Asset as AstroportAsset, AssetInfo as AstroportAssetInfo};
 use astroport::pair::{Cw20HookMsg as AstroportCw20HookMsg, ExecuteMsg as AstroportExecuteMsg};
-use astroport::querier::{query_balance, query_pair_info};
+use astroport::querier::{query_balance, query_pair_info, query_token_balance};
 use terraswap::asset::{Asset, AssetInfo};
 use white_whale::ust_vault::msg::ExecuteMsg as WhiteWhaleExecuteMsg;
 use white_whale::ust_vault::msg::FlashLoanPayload;
@@ -76,7 +76,64 @@ pub fn execute(
             astroport_factory_address,
             owner_address,
         ),
+        ExecuteMsg::WithdrawNative { send_to, denom } => {
+            withdraw_native(deps, env, info, send_to, denom)
+        }
+        ExecuteMsg::WithdrawToken {
+            send_to,
+            contract_address,
+        } => withdraw_token(deps, env, info, send_to, contract_address),
     }
+}
+
+pub fn withdraw_native(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    send_to: String,
+    denom: String,
+) -> Result<Response, ContractError> {
+    let state = STATE.load(deps.storage)?;
+    if state.owner_address != info.sender {
+        return Err(ContractError::Unauthorized {});
+    }
+    let amount = query_balance(&deps.querier, env.contract.address, denom.clone())?;
+
+    Ok(Response::new().add_message(
+        Asset {
+            info: AssetInfo::NativeToken { denom },
+            amount,
+        }
+        .into_msg(&deps.querier, deps.api.addr_validate(send_to.as_ref())?)?,
+    ))
+}
+
+pub fn withdraw_token(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    send_to: String,
+    contract_address: String,
+) -> Result<Response, ContractError> {
+    let state = STATE.load(deps.storage)?;
+    if state.owner_address != info.sender {
+        return Err(ContractError::Unauthorized {});
+    }
+    let amount = query_token_balance(
+        &deps.querier,
+        env.contract.address,
+        deps.api.addr_validate(contract_address.as_ref())?,
+    )?;
+
+    Ok(Response::new().add_message(
+        Asset {
+            info: AssetInfo::Token {
+                contract_addr: contract_address,
+            },
+            amount,
+        }
+        .into_msg(&deps.querier, deps.api.addr_validate(send_to.as_ref())?)?,
+    ))
 }
 
 pub fn update_config(
@@ -129,66 +186,31 @@ pub fn try_flash_loan(
 ) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
     let cluster_address = deps.api.addr_validate(cluster_address_raw.as_str())?;
-    let cluster_state = get_cluster_state(deps.as_ref(), &cluster_address)?;
 
-    let supply: Uint128 = cluster_state.outstanding_balance_tokens;
-    let net_asset_val: Uint128 = cluster_state
-        .inv
-        .iter()
-        .zip(cluster_state.prices.iter())
-        .map(|(i, p)| (Decimal::from_str(p.as_str()).unwrap()) * i.clone())
-        .sum::<Uint128>();
-
-    let intrinsic: Decimal = Decimal::from_ratio(net_asset_val, supply);
-
-    let pool_info = query_pair_info(
-        &deps.querier,
-        state.astroport_factory_address,
-        &[
-            AstroportAssetInfo::NativeToken {
-                denom: "uusd".to_string(),
-            },
-            AstroportAssetInfo::Token {
-                contract_addr: deps
-                    .api
-                    .addr_validate(cluster_state.cluster_token.as_str())?,
-            },
-        ],
-    )?;
-
-    let assets = pool_info.query_pools(&deps.querier, pool_info.contract_addr.clone())?;
-
-    let (ust_amt, ct_amt) = match assets.clone()[0].info {
-        AstroportAssetInfo::NativeToken { .. } => (assets[0].amount, assets[1].amount),
-        AstroportAssetInfo::Token { .. } => (assets[1].amount, assets[0].amount),
-    };
-
-    let market = Decimal::from_ratio(ust_amt, ct_amt);
-    let front = beeb(ust_amt, ct_amt, intrinsic, TEN4);
-
-    let (callback, amount) = if market < intrinsic {
-        let amount = (front) / TEN12 - ust_amt;
-        (ExecuteMsg::CallbackRedeem {}, amount)
-    } else {
-        let back = ct_amt * TEN12 * intrinsic;
-        let amount = (front - back) / TEN12;
-        (ExecuteMsg::CallbackCreate {}, amount)
-    };
-
+    let estimate = query_estimate_arbitrage(deps.as_ref(), cluster_address_raw)?;
     LOAN_INFO.save(
         deps.storage,
         &LoanInfo {
             user_address: info.sender,
-            amount,
+            amount: estimate.arbitrage_cost,
             cluster_address: cluster_address.clone(),
+            inv: estimate.inv,
+            target: estimate.target,
+            prices: estimate.prices,
         },
     )?;
+
+    let callback = if estimate.market_price < estimate.intrinsic_price {
+        ExecuteMsg::CallbackRedeem {}
+    } else {
+        ExecuteMsg::CallbackCreate {}
+    };
 
     let requested_asset = Asset {
         info: AssetInfo::NativeToken {
             denom: "uusd".to_string(),
         },
-        amount,
+        amount: estimate.arbitrage_cost,
     };
 
     Ok(Response::new()
@@ -203,11 +225,10 @@ pub fn try_flash_loan(
             funds: vec![],
         }))
         .add_attributes(vec![
-            attr("market", market.to_string()),
-            attr("intrinsic", intrinsic.to_string()),
-            attr("loan_amount", amount.to_string()),
-            attr("ust_amount", ust_amt.to_string()),
-            attr("ct_amount", ct_amt.to_string()),
+            attr("key", "value"),
+            attr("market", estimate.market_price.to_string()),
+            attr("intrinsic", estimate.intrinsic_price.to_string()),
+            attr("loan_amount", estimate.arbitrage_cost.to_string()),
         ]))
 }
 
@@ -243,21 +264,21 @@ pub fn callback_create(deps: DepsMut, env: Env) -> Result<Response, ContractErro
     let state = STATE.load(deps.storage)?;
     let loan_info = LOAN_INFO.load(deps.storage)?;
 
-    let cluster_state = get_cluster_state(deps.as_ref(), &loan_info.cluster_address)?;
-    let total_asset_amount: Uint128 = cluster_state.clone().inv.iter().sum();
-
-    let asset_amounts = cluster_state
+    let total_asset_amount: Uint128 = loan_info.inv.clone().iter().sum();
+    let asset_amounts = loan_info
         .inv
         .iter()
-        .map(|&inv| Decimal::from_ratio(inv, total_asset_amount) * (loan_info.amount.clone()));
+        .map(|&inv| inv * loan_info.amount.clone() / total_asset_amount);
 
-    let target_infos = cluster_state.target.iter().map(|x| x.info.clone());
     let mut messages: Vec<CosmosMsg> = vec![];
+    for (asset, amount) in loan_info.target.iter().zip(asset_amounts) {
+        if let AstroportAssetInfo::NativeToken { denom } = asset.info.clone() {
+            if denom == "uusd" {
+                continue;
+            }
+        }
 
-    for (info, amount) in target_infos.zip(asset_amounts) {
-        if matches!(info.clone(),AstroportAssetInfo::NativeToken { denom } if denom == "uusd" )
-            || amount.is_zero()
-        {
+        if amount.is_zero() {
             continue;
         }
 
@@ -269,7 +290,7 @@ pub fn callback_create(deps: DepsMut, env: Env) -> Result<Response, ContractErro
                 },
                 amount,
             },
-            info,
+            asset.info.clone(),
             state.astroport_factory_address.clone(),
         )?);
     }
@@ -288,7 +309,7 @@ pub fn arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
     let loan_info = LOAN_INFO.load(deps.storage)?;
 
-    let assets: Vec<AstroportAsset> = get_cluster_state(deps.as_ref(), &loan_info.cluster_address)?
+    let assets: Vec<AstroportAsset> = loan_info
         .target
         .iter()
         .map(|asset| AstroportAsset {
@@ -300,13 +321,14 @@ pub fn arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
         })
         .collect();
 
-    let allowances: Vec<CosmosMsg> = assets
-        .clone()
-        .iter()
-        .filter_map(|asset| match asset.info.clone() {
-            AstroportAssetInfo::NativeToken { .. } => None,
+    let mut funds = vec![];
+    for asset in assets.clone() {
+        match asset.info {
+            AstroportAssetInfo::NativeToken { denom } => {
+                funds.push(coin(asset.amount.u128(), denom));
+            }
             AstroportAssetInfo::Token { contract_addr } => {
-                return Some(CosmosMsg::Wasm(WasmMsg::Execute {
+                messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: contract_addr.to_string(),
                     msg: to_binary(&Cw20ExecuteMsg::IncreaseAllowance {
                         spender: state.incentive_addres.to_string(),
@@ -317,19 +339,8 @@ pub fn arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
                     funds: vec![],
                 }));
             }
-        })
-        .collect();
-
-    messages.extend_from_slice(&allowances);
-
-    let funds: Vec<Coin> = assets
-        .clone()
-        .iter()
-        .filter_map(|asset| match asset.info.clone() {
-            AstroportAssetInfo::NativeToken { denom } => Some(coin(asset.amount.u128(), denom)),
-            AstroportAssetInfo::Token { .. } => None,
-        })
-        .collect();
+        }
+    }
 
     messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: state.incentive_addres.to_string(),
@@ -435,7 +446,7 @@ pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractEr
     match msg.id {
         1 => {
             let asset_infos: Vec<AstroportAssetInfo> =
-                get_cluster_state(deps.as_ref(), &loan_info.cluster_address)?
+            loan_info
                     .target
                     .iter()
                     .map(|x| x.info.clone())
@@ -498,6 +509,9 @@ pub fn _user_profit(deps: DepsMut, env: Env) -> Result<Response, ContractError> 
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::UstVaultAddress {} => to_binary(&query_vault_address(deps)?),
+        QueryMsg::EstimateArbitrage { cluster_address } => {
+            to_binary(&query_estimate_arbitrage(deps, cluster_address)?)
+        }
     }
 }
 
@@ -505,6 +519,68 @@ fn query_vault_address(deps: Deps) -> StdResult<UstVaultAddressResponse> {
     let state = STATE.load(deps.storage)?;
     Ok(UstVaultAddressResponse {
         vault_address: state.vault_address,
+    })
+}
+
+fn query_estimate_arbitrage(
+    deps: Deps,
+    cluster_address_raw: String,
+) -> StdResult<EstimateArbitrageResponse> {
+    let state = STATE.load(deps.storage)?;
+    let cluster_address = deps.api.addr_validate(cluster_address_raw.as_str())?;
+    let cluster_state = get_cluster_state(deps, &cluster_address)?;
+
+    let supply: Uint128 = cluster_state.outstanding_balance_tokens;
+    let net_asset_val: Uint128 = cluster_state
+        .inv
+        .iter()
+        .zip(cluster_state.prices.iter())
+        .map(|(i, p)| (Decimal::from_str(p.as_str()).unwrap()) * i.clone())
+        .sum::<Uint128>();
+
+    let pool_info = query_pair_info(
+        &deps.querier,
+        state.astroport_factory_address,
+        &[
+            AstroportAssetInfo::NativeToken {
+                denom: "uusd".to_string(),
+            },
+            AstroportAssetInfo::Token {
+                contract_addr: deps
+                    .api
+                    .addr_validate(cluster_state.cluster_token.as_str())?,
+            },
+        ],
+    )?;
+
+    let assets = pool_info.query_pools(&deps.querier, pool_info.contract_addr.clone())?;
+
+    let (ust_amt, ct_amt) = match assets.clone()[0].info {
+        AstroportAssetInfo::NativeToken { .. } => (assets[0].amount, assets[1].amount),
+        AstroportAssetInfo::Token { .. } => (assets[1].amount, assets[0].amount),
+    };
+
+    let intrinsic_price: Decimal = Decimal::from_ratio(net_asset_val, supply);
+    let market_price = Decimal::from_ratio(ust_amt, ct_amt);
+
+    let intrinsic_sqrt = intrinsic_price.sqrt() * TEN4;
+    let ct_sqrt = Decimal::from_str(&ct_amt.to_string()).unwrap().sqrt() * TEN4;
+    let ust_sqrt = Decimal::from_str(&ust_amt.to_string()).unwrap().sqrt() * TEN4;
+    let front = intrinsic_sqrt * ct_sqrt * ust_sqrt;
+
+    let arbitrage_cost: Uint128 = if market_price < intrinsic_price {
+        front / TEN12 - ust_amt
+    } else {
+        let back = ct_amt * TEN12 * intrinsic_price;
+        (front - back) / TEN12
+    };
+    Ok(EstimateArbitrageResponse {
+        market_price,
+        intrinsic_price,
+        arbitrage_cost,
+        inv: cluster_state.inv,
+        target: cluster_state.target,
+        prices: cluster_state.prices,
     })
 }
 

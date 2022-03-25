@@ -1,6 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use astroport::asset::Asset as AstroportAsset;
 use cosmwasm_std::{Addr, Uint128};
 use cw_storage_plus::Item;
 
@@ -17,6 +18,9 @@ pub struct LoanInfo {
     pub cluster_address: Addr,
     pub user_address: Addr,
     pub amount: Uint128,
+    pub target: Vec<AstroportAsset>,
+    pub inv: Vec<Uint128>,
+    pub prices: Vec<String>,
 }
 
 pub const STATE: Item<State> = Item::new("state");
