@@ -11,17 +11,26 @@ pub struct InstantiateMsg {
     pub vault_address: String,
     pub incentive_address: String,
     pub astroport_factory_address: String,
+    pub owner_address: String,
 }
 
 // Execute Message
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
-    FlashLoan { cluster_address: String },
+    FlashLoan {
+        cluster_address: String,
+    },
     CallbackRedeem {},
     _UserProfit {},
     CallbackCreate {},
     ArbCreate {},
+    UpdateConfig {
+        vault_address: Option<String>,
+        incentive_address: Option<String>,
+        astroport_factory_address: Option<String>,
+        owner_address: Option<String>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

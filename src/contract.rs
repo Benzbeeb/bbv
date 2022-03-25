@@ -43,6 +43,7 @@ pub fn instantiate(
         astroport_factory_address: deps
             .api
             .addr_validate(msg.astroport_factory_address.as_str())?,
+        owner_address: deps.api.addr_validate(msg.owner_address.as_str())?,
     };
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     STATE.save(deps.storage, &state)?;
@@ -62,7 +63,63 @@ pub fn execute(
         ExecuteMsg::_UserProfit {} => _user_profit(deps, env),
         ExecuteMsg::CallbackCreate {} => callback_create(deps, env),
         ExecuteMsg::ArbCreate {} => arb_create(deps, env),
+        ExecuteMsg::UpdateConfig {
+            vault_address,
+            incentive_address,
+            astroport_factory_address,
+            owner_address,
+        } => update_config(
+            deps,
+            info,
+            vault_address,
+            incentive_address,
+            astroport_factory_address,
+            owner_address,
+        ),
     }
+}
+
+pub fn update_config(
+    deps: DepsMut,
+    info: MessageInfo,
+    vault_address_raw: Option<String>,
+    incentive_addres_raw: Option<String>,
+    astroport_factory_address_raw: Option<String>,
+    owner_address_raw: Option<String>,
+) -> Result<Response, ContractError> {
+    let state = STATE.load(deps.storage)?;
+
+    if state.owner_address.clone() != info.sender {
+        return Err(ContractError::Unauthorized {});
+    }
+
+    let new_state = State {
+        vault_address: if let Some(new_vault_address) = vault_address_raw {
+            deps.api.addr_validate(new_vault_address.as_ref())?
+        } else {
+            state.vault_address
+        },
+        incentive_addres: if let Some(new_incentive_addres) = incentive_addres_raw {
+            deps.api.addr_validate(new_incentive_addres.as_ref())?
+        } else {
+            state.incentive_addres
+        },
+        astroport_factory_address: if let Some(new_astroport_factory_address) =
+            astroport_factory_address_raw
+        {
+            deps.api
+                .addr_validate(new_astroport_factory_address.as_ref())?
+        } else {
+            state.astroport_factory_address
+        },
+        owner_address: if let Some(new_owner_address) = owner_address_raw {
+            deps.api.addr_validate(new_owner_address.as_ref())?
+        } else {
+            state.owner_address
+        },
+    };
+    STATE.save(deps.storage, &new_state)?;
+    Ok(Response::new())
 }
 
 pub fn try_flash_loan(
@@ -107,13 +164,12 @@ pub fn try_flash_loan(
     };
 
     let market = Decimal::from_ratio(ust_amt, ct_amt);
+    let front = beeb(ust_amt, ct_amt, intrinsic, TEN4);
 
     let (callback, amount) = if market < intrinsic {
-        let front = beeb(ust_amt, ct_amt, intrinsic, TEN4);
         let amount = (front) / TEN12 - ust_amt;
         (ExecuteMsg::CallbackRedeem {}, amount)
     } else {
-        let front = beeb(ust_amt, ct_amt, intrinsic, TEN4);
         let back = ct_amt * TEN12 * intrinsic;
         let amount = (front - back) / TEN12;
         (ExecuteMsg::CallbackCreate {}, amount)

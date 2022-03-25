@@ -9,6 +9,7 @@ pub struct State {
     pub vault_address: Addr,
     pub incentive_addres: Addr,
     pub astroport_factory_address: Addr,
+    pub owner_address: Addr,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
