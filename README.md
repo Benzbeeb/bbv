@@ -1,106 +1,82 @@
-# CosmWasm Starter Pack
+# BBV
 
-This is a template to build smart contracts in Rust to run inside a
-[Cosmos SDK](https://github.com/cosmos/cosmos-sdk) module on all chains that enable it.
-To understand the framework better, please read the overview in the
-[cosmwasm repo](https://github.com/CosmWasm/cosmwasm/blob/master/README.md),
-and dig into the [cosmwasm docs](https://www.cosmwasm.com).
-This assumes you understand the theory and just want to get coding.
+This repository contains the full source code for the first version of the BBV smart contracts deployed on Terra.
 
-## Creating a new repo from template
+## Development
 
-Assuming you have a recent version of rust and cargo (v1.51.0+) installed
-(via [rustup](https://rustup.rs/)),
-then the following should get you a new repo to start a contract:
+### Environment Setup
 
+- Rust v.1.58.1
+- `wasm32-unknown-unknown` target
+- Docker
 
-Install [cargo-generate](https://github.com/ashleygwilliams/cargo-generate) and cargo-run-script.
-Unless you did that before, run this line now:
+1. Install [`rustup`](https://rustup.rs)
+2. Run the following
 
-```sh
-cargo install cargo-generate cargo-run-script --features vendored-openssl 
+```shell
+rustup default 1.58.1
+rustup target add wasm32-unknown-unknown
 ```
 
-Now, use it to create your new contract.
-Go to the folder in which you want to place it and run:
+3. Make sure [Docker](https://docker.com) is installed on your machine
 
+### Compiling
 
-**Latest: 0.16**
+Go to the contract directory and run
 
-```sh
-cargo generate --git https://github.com/CosmWasm/cw-template.git --name PROJECT_NAME
-````
+After making sure tests pass, you can compile each contract with the following
 
-**Older Version**
-
-Pass version as branch flag:
-
-```sh
-cargo generate --git https://github.com/CosmWasm/cw-template.git --branch <version> --name PROJECT_NAME
-````
-
-Example:
-
-```sh
-cargo generate --git https://github.com/CosmWasm/cw-template.git --branch 0.14 --name PROJECT_NAME
+```shell
+RUSTFLAGS='-C link-arg=-s' cargo wasm
+cp ../../target/wasm32-unknown-unknown/release/<CONTRACT_NAME>.wasm .
+ls -l <CONTRACT_NAME>.wasm
+sha256sum <CONTRACT_NAME>.wasm
 ```
 
-You will now have a new folder called `PROJECT_NAME` (I hope you changed that to something else)
-containing a simple working contract and build system that you can customize.
+#### Production
 
-## Create a Repo
+For production builds, run the following:
 
-After generating, you have a initialized local git repo, but no commits, and no remote.
-Go to a server (eg. github) and create a new upstream repo (called `YOUR-GIT-URL` below).
-Then run the following:
-
-```sh
-# this is needed to create a valid Cargo.lock file (see below)
-cargo check
-git branch -M main
-git add .
-git commit -m 'Initial Commit'
-git remote add origin YOUR-GIT-URL
-git push -u origin master
+```
+docker run --rm -v "$(pwd)":/code \
+  --mount type=volume,source="$(basename "$(pwd)")_cache",target=/code/target \
+  --mount type=volume,source=registry_cache,target=/usr/local/cargo/registry \
+  cosmwasm/workspace-optimizer:0.12.5
 ```
 
-## CI Support
+or
 
-We have template configurations for both [GitHub Actions](.github/workflows/Basic.yml)
-and [Circle CI](.circleci/config.yml) in the generated project, so you can
-get up and running with CI right away.
+```shell
+chmod +x build_release.sh
+sh build_release.sh
+```
 
-One note is that the CI runs all `cargo` commands
-with `--locked` to ensure it uses the exact same versions as you have locally. This also means
-you must have an up-to-date `Cargo.lock` file, which is not auto-generated.
-The first time you set up the project (or after adding any dep), you should ensure the
-`Cargo.lock` file is updated, so the CI will test properly. This can be done simply by
-running `cargo check` or `cargo unit-test`.
+## Formatting
 
-## Using your project
+Make sure you run `rustfmt` before creating a PR to the repo. You need to install the `nightly` version of `rustfmt`.
 
-Once you have your custom repo, you should check out [Developing](./Developing.md) to explain
-more on how to run tests and develop code. Or go through the
-[online tutorial](https://docs.cosmwasm.com/) to get a better feel
-of how to develop.
+```
+rustup toolchain install nightly
+```
 
-[Publishing](./Publishing.md) contains useful information on how to publish your contract
-to the world, once you are ready to deploy it on a running blockchain. And
-[Importing](./Importing.md) contains information about pulling in other contracts or crates
-that have been published.
+To run `rustfmt`,
 
-Please replace this README file with information about your specific project. You can keep
-the `Developing.md` and `Publishing.md` files as useful referenced, but please set some
-proper description in the README.
+```
+cargo fmt
+```
 
-## Gitpod integration
+## Linting
 
-[Gitpod](https://www.gitpod.io/) container-based development platform will be enabled on your project by default.
+You should run `clippy` also. This is a lint tool for rust. It suggests more efficient/readable code. You can see [the clippy document](https://rust-lang.github.io/rust-clippy/master/index.html) for more information. You need to install `nightly` version of `clippy`.
 
-Workspace contains:
- - **rust**: for builds
- - [wasmd](https://github.com/CosmWasm/wasmd): for local node setup and client
- - **jq**: shell JSON manipulation tool
+### Install
 
-Follow [Gitpod Getting Started](https://www.gitpod.io/docs/getting-started) and launch your workspace.
+```
+rustup toolchain install nightly
+```
 
+### Run
+
+```
+cargo clippy -- -D warnings
+```

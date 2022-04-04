@@ -5,6 +5,12 @@ use astroport::asset::Asset as AstroportAsset;
 use cosmwasm_std::{Addr, Uint128};
 use cw_storage_plus::Item;
 
+//////////////////////////////////////////////////////////////////////
+/// STATE
+//////////////////////////////////////////////////////////////////////
+
+/// ## Description
+/// A custom struct for storing the state contract setting.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct State {
     pub vault_address: Addr,
@@ -13,6 +19,12 @@ pub struct State {
     pub owner_address: Addr,
 }
 
+//////////////////////////////////////////////////////////////////////
+/// LOAN INFO
+//////////////////////////////////////////////////////////////////////
+
+/// ## Description
+/// A custom struct for storing the loaner.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct LoanInfo {
     pub cluster_address: Addr,
