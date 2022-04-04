@@ -26,8 +26,8 @@ use std::str::FromStr;
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:bbv";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
-const TEN4: Uint128 = Uint128::new(10_000u128);
-const TEN12: Uint128 = Uint128::new(1_000_000_000_000u128);
+const MULTIPLIER: Uint128 = Uint128::new(10_000u128);
+const MULTIPLIER_3: Uint128 = Uint128::new(1_000_000_000_000u128);
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
@@ -82,7 +82,7 @@ pub fn execute(
             send_to,
             contract_address,
         } => withdraw_token(deps, env, info, send_to, contract_address),
-        ExecuteMsg::SellAllAndTakeProfit {} => swap_to_ust_and_take_profit(deps, env),
+        ExecuteMsg::SwapToUstAndTakeProfit {} => swap_to_ust_and_take_profit(deps, env),
     }
 }
 
@@ -255,7 +255,7 @@ pub fn callback_redeem(deps: DepsMut, env: Env) -> Result<Response, ContractErro
         CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: env.contract.address.to_string(),
             funds: vec![],
-            msg: to_binary(&ExecuteMsg::SellAllAndTakeProfit {})?,
+            msg: to_binary(&ExecuteMsg::SwapToUstAndTakeProfit {})?,
         }),
     ];
 
@@ -560,16 +560,16 @@ fn query_estimate_arbitrage(
     let intrinsic_price: Decimal = Decimal::from_ratio(net_asset_val, supply);
     let market_price = Decimal::from_ratio(ust_amt, ct_amt);
 
-    let intrinsic_sqrt = intrinsic_price.sqrt() * TEN4;
-    let ct_sqrt = Decimal::from_str(&ct_amt.to_string()).unwrap().sqrt() * TEN4;
-    let ust_sqrt = Decimal::from_str(&ust_amt.to_string()).unwrap().sqrt() * TEN4;
+    let intrinsic_sqrt = intrinsic_price.sqrt() * MULTIPLIER;
+    let ct_sqrt = Decimal::from_str(&ct_amt.to_string()).unwrap().sqrt() * MULTIPLIER;
+    let ust_sqrt = Decimal::from_str(&ust_amt.to_string()).unwrap().sqrt() * MULTIPLIER;
     let front = intrinsic_sqrt * ct_sqrt * ust_sqrt;
 
     let arbitrage_cost: Uint128 = if market_price < intrinsic_price {
-        front / TEN12 - ust_amt
+        front / MULTIPLIER_3 - ust_amt
     } else {
-        let back = ct_amt * TEN12 * intrinsic_price;
-        (front - back) / TEN12
+        let back = ct_amt * MULTIPLIER_3 * intrinsic_price;
+        (front - back) / MULTIPLIER_3
     };
     Ok(EstimateArbitrageResponse {
         market_price,
@@ -586,12 +586,4 @@ pub fn get_cluster_state(deps: Deps, cluster: &Addr) -> StdResult<ClusterStateRe
         contract_addr: cluster.to_string(),
         msg: to_binary(&QueryMsgAstroPort::ClusterState {})?,
     }))
-}
-
-pub fn beeb(ust_amt: Uint128, ct_amt: Uint128, intrinsic: Decimal, multiplier: Uint128) -> Uint128 {
-    let intrinsic_sqrt = intrinsic.sqrt() * multiplier;
-    let ct_sqrt = Decimal::from_str(&ct_amt.to_string()).unwrap().sqrt() * multiplier;
-    let ust_sqrt = Decimal::from_str(&ust_amt.to_string()).unwrap().sqrt() * multiplier;
-
-    intrinsic_sqrt * ct_sqrt * ust_sqrt
 }
