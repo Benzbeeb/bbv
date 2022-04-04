@@ -1,8 +1,8 @@
 use cosmwasm_std::{coin, to_binary, CosmosMsg, DepsMut, Env, Response, Uint128, WasmMsg};
 use cw20::Cw20ExecuteMsg;
 
-use crate::contract::{repay_and_take_profit, swap_to};
 use crate::error::ContractError;
+use crate::flash_loan::{repay_and_take_profit, swap_to};
 use crate::msg::{ExecuteMsg, IncentivesMsg};
 use crate::state::{LOAN_INFO, STATE};
 
