@@ -25,6 +25,7 @@ pub enum ExecuteMsg {
     _UserProfit {},
     CallbackCreate {},
     ArbCreate {},
+    SellAllAndTakeProfit {},
     UpdateConfig {
         vault_address: Option<String>,
         incentive_address: Option<String>,

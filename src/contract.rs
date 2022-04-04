@@ -2,8 +2,7 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     attr, coin, to_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo,
-    QuerierWrapper, QueryRequest, Reply, ReplyOn, Response, StdResult, SubMsg, Uint128, WasmMsg,
-    WasmQuery,
+    QuerierWrapper, QueryRequest, Response, StdResult, Uint128, WasmMsg, WasmQuery,
 };
 use cw2::set_contract_version;
 use cw20::Cw20ExecuteMsg;
@@ -59,7 +58,7 @@ pub fn execute(
 ) -> Result<Response, ContractError> {
     match msg {
         ExecuteMsg::FlashLoan { cluster_address } => try_flash_loan(deps, info, cluster_address),
-        ExecuteMsg::CallbackRedeem {} => callback_redeem(deps),
+        ExecuteMsg::CallbackRedeem {} => callback_redeem(deps, env),
         ExecuteMsg::_UserProfit {} => _user_profit(deps, env),
         ExecuteMsg::CallbackCreate {} => callback_create(deps, env),
         ExecuteMsg::ArbCreate {} => arb_create(deps, env),
@@ -83,6 +82,7 @@ pub fn execute(
             send_to,
             contract_address,
         } => withdraw_token(deps, env, info, send_to, contract_address),
+        ExecuteMsg::SellAllAndTakeProfit {} => swap_to_ust_and_take_profit(deps, env),
     }
 }
 
@@ -232,7 +232,7 @@ pub fn try_flash_loan(
         ]))
 }
 
-pub fn callback_redeem(deps: DepsMut) -> Result<Response, ContractError> {
+pub fn callback_redeem(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
     let loan_info = LOAN_INFO.load(deps.storage)?;
     let asset = astroport::asset::Asset {
@@ -242,22 +242,24 @@ pub fn callback_redeem(deps: DepsMut) -> Result<Response, ContractError> {
         amount: loan_info.amount.clone(),
     };
 
-    let msg = CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: state.incentive_addres.to_string(),
-        funds: vec![coin(loan_info.amount.u128(), "uusd".to_string())],
-        msg: to_binary(&IncentivesMsg::ArbClusterRedeem {
-            cluster_contract: loan_info.cluster_address.to_string(),
-            asset,
-            min_cluster: Some(Uint128::from(1u128)),
-        })?,
-    });
+    let msgs = vec![
+        CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: state.incentive_addres.to_string(),
+            funds: vec![coin(loan_info.amount.u128(), "uusd".to_string())],
+            msg: to_binary(&IncentivesMsg::ArbClusterRedeem {
+                cluster_contract: loan_info.cluster_address.to_string(),
+                asset,
+                min_cluster: Some(Uint128::from(1u128)),
+            })?,
+        }),
+        CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: env.contract.address.to_string(),
+            funds: vec![],
+            msg: to_binary(&ExecuteMsg::SellAllAndTakeProfit {})?,
+        }),
+    ];
 
-    Ok(Response::new().add_submessage(SubMsg {
-        msg,
-        gas_limit: None,
-        id: 1,
-        reply_on: ReplyOn::Success,
-    }))
+    Ok(Response::new().add_messages(msgs))
 }
 
 pub fn callback_create(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
@@ -437,15 +439,12 @@ pub fn repay_and_take_profit(
     Ok(messages)
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
-pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractError> {
+pub fn swap_to_ust_and_take_profit(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
     let loan_info = LOAN_INFO.load(deps.storage)?;
     let mut messages = vec![];
 
-    match msg.id {
-        1 => {
-            let asset_infos: Vec<AstroportAssetInfo> =
+    let asset_infos: Vec<AstroportAssetInfo> =
             loan_info
                     .target
                     .iter()
@@ -455,35 +454,33 @@ pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractEr
                     })
                     .collect();
 
-            for asset_info in asset_infos {
-                let asset = AstroportAsset {
-                    info: asset_info.clone(),
-                    amount: asset_info.query_pool(&deps.querier, env.contract.address.clone())?,
-                };
+    for asset_info in asset_infos {
+        let asset = AstroportAsset {
+            info: asset_info.clone(),
+            amount: asset_info.query_pool(&deps.querier, env.contract.address.clone())?,
+        };
 
-                if asset.amount == Uint128::zero() {
-                    continue;
-                }
-
-                messages.push(swap_to(
-                    &deps.querier,
-                    asset,
-                    AstroportAssetInfo::NativeToken {
-                        denom: "uusd".to_string(),
-                    },
-                    state.astroport_factory_address.clone(),
-                )?)
-            }
-
-            messages.extend_from_slice(&repay_and_take_profit(
-                &deps.querier,
-                loan_info.amount,
-                env.contract.address,
-                state.vault_address,
-            )?);
+        if asset.amount == Uint128::zero() {
+            continue;
         }
-        _ => return Err(ContractError::Unauthorized {}),
+
+        messages.push(swap_to(
+            &deps.querier,
+            asset,
+            AstroportAssetInfo::NativeToken {
+                denom: "uusd".to_string(),
+            },
+            state.astroport_factory_address.clone(),
+        )?)
     }
+
+    messages.extend_from_slice(&repay_and_take_profit(
+        &deps.querier,
+        loan_info.amount,
+        env.contract.address,
+        state.vault_address,
+    )?);
+
     Ok(Response::new().add_messages(messages))
 }
 
