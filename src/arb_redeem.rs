@@ -7,7 +7,7 @@ use crate::state::{LOAN_INFO, STATE};
 
 use astroport::asset::{Asset as AstroportAsset, AssetInfo as AstroportAssetInfo};
 
-pub fn callback_redeem(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
+pub fn try_callback_redeem(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
     let loan_info = LOAN_INFO.load(deps.storage)?;
     let asset = astroport::asset::Asset {
@@ -37,7 +37,7 @@ pub fn callback_redeem(deps: DepsMut, env: Env) -> Result<Response, ContractErro
     Ok(Response::new().add_messages(msgs))
 }
 
-pub fn swap_to_ust_and_take_profit(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
+pub fn try_swap_to_ust_and_take_profit(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
     let loan_info = LOAN_INFO.load(deps.storage)?;
     let mut messages = vec![];

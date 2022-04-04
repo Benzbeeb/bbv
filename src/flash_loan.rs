@@ -84,7 +84,7 @@ pub fn repay_and_take_profit(
 ) -> StdResult<Vec<CosmosMsg>> {
     let mut messages = vec![];
 
-    let return_amount = loan_amount.checked_div(Uint128::from(999u128)).unwrap() + loan_amount;
+    let return_amount = loan_amount.checked_div(Uint128::from(999u128))? + loan_amount;
     messages.push(
         Asset {
             info: AssetInfo::NativeToken {

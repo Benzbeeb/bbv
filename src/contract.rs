@@ -6,8 +6,8 @@ use cosmwasm_std::{
 };
 use cw2::set_contract_version;
 
-use crate::arb_create::{arb_create, callback_create};
-use crate::arb_redeem::{callback_redeem, swap_to_ust_and_take_profit};
+use crate::arb_create::{try_arb_create, try_callback_create};
+use crate::arb_redeem::{try_callback_redeem, try_swap_to_ust_and_take_profit};
 use crate::error::ContractError;
 use crate::flash_loan::{query_estimate_arbitrage, try_flash_loan};
 use crate::msg::{
@@ -52,16 +52,16 @@ pub fn execute(
 ) -> Result<Response, ContractError> {
     match msg {
         ExecuteMsg::FlashLoan { cluster_address } => try_flash_loan(deps, info, cluster_address),
-        ExecuteMsg::CallbackRedeem {} => callback_redeem(deps, env),
-        ExecuteMsg::_UserProfit {} => _user_profit(deps, env),
-        ExecuteMsg::CallbackCreate {} => callback_create(deps, env),
-        ExecuteMsg::ArbCreate {} => arb_create(deps, env),
+        ExecuteMsg::CallbackRedeem {} => try_callback_redeem(deps, env),
+        ExecuteMsg::_UserProfit {} => try_user_profit(deps, env),
+        ExecuteMsg::CallbackCreate {} => try_callback_create(deps, env),
+        ExecuteMsg::ArbCreate {} => try_arb_create(deps, env),
         ExecuteMsg::UpdateConfig {
             vault_address,
             incentive_address,
             astroport_factory_address,
             owner_address,
-        } => update_config(
+        } => try_update_config(
             deps,
             info,
             vault_address,
@@ -70,17 +70,17 @@ pub fn execute(
             owner_address,
         ),
         ExecuteMsg::WithdrawNative { send_to, denom } => {
-            withdraw_native(deps, env, info, send_to, denom)
+            try_withdraw_native(deps, env, info, send_to, denom)
         }
         ExecuteMsg::WithdrawToken {
             send_to,
             contract_address,
-        } => withdraw_token(deps, env, info, send_to, contract_address),
-        ExecuteMsg::SwapToUstAndTakeProfit {} => swap_to_ust_and_take_profit(deps, env),
+        } => try_withdraw_token(deps, env, info, send_to, contract_address),
+        ExecuteMsg::SwapToUstAndTakeProfit {} => try_swap_to_ust_and_take_profit(deps, env),
     }
 }
 
-pub fn withdraw_native(
+pub fn try_withdraw_native(
     deps: DepsMut,
     env: Env,
     info: MessageInfo,
@@ -102,7 +102,7 @@ pub fn withdraw_native(
     ))
 }
 
-pub fn withdraw_token(
+pub fn try_withdraw_token(
     deps: DepsMut,
     env: Env,
     info: MessageInfo,
@@ -130,7 +130,7 @@ pub fn withdraw_token(
     ))
 }
 
-pub fn update_config(
+pub fn try_update_config(
     deps: DepsMut,
     info: MessageInfo,
     vault_address_raw: Option<String>,
@@ -173,7 +173,7 @@ pub fn update_config(
     Ok(Response::new())
 }
 
-pub fn _user_profit(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
+pub fn try_user_profit(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let loan_info = LOAN_INFO.load(deps.storage)?;
     let amount = query_balance(
         &deps.querier,

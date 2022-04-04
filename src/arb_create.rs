@@ -8,7 +8,7 @@ use crate::state::{LOAN_INFO, STATE};
 
 use astroport::asset::{Asset as AstroportAsset, AssetInfo as AstroportAssetInfo};
 
-pub fn callback_create(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
+pub fn try_callback_create(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
     let loan_info = LOAN_INFO.load(deps.storage)?;
 
@@ -52,7 +52,7 @@ pub fn callback_create(deps: DepsMut, env: Env) -> Result<Response, ContractErro
     Ok(Response::new().add_messages(messages))
 }
 
-pub fn arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
+pub fn try_arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let mut messages: Vec<CosmosMsg> = vec![];
     let state = STATE.load(deps.storage)?;
     let loan_info = LOAN_INFO.load(deps.storage)?;
