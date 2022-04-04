@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    attr, coin, to_binary, Addr, CosmosMsg, Decimal, Deps, DepsMut, MessageInfo, QuerierWrapper,
-    Response, StdResult, Uint128, WasmMsg,
+    attr, coin, to_binary, Addr, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo,
+    QuerierWrapper, Response, StdResult, Uint128, WasmMsg,
 };
 
 use cw20::Cw20ExecuteMsg;
@@ -12,7 +12,7 @@ use crate::state::{LoanInfo, LOAN_INFO, STATE};
 
 use astroport::asset::{Asset as AstroportAsset, AssetInfo as AstroportAssetInfo};
 use astroport::pair::{Cw20HookMsg as AstroportCw20HookMsg, ExecuteMsg as AstroportExecuteMsg};
-use astroport::querier::query_pair_info;
+use astroport::querier::{query_balance, query_pair_info};
 use terraswap::asset::{Asset, AssetInfo};
 
 use white_whale::ust_vault::msg::ExecuteMsg as WhiteWhaleExecuteMsg;
@@ -149,6 +149,24 @@ pub fn swap_to(
             return Ok(message);
         }
     }
+}
+
+pub fn try_user_profit(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
+    let loan_info = LOAN_INFO.load(deps.storage)?;
+    let amount = query_balance(
+        &deps.querier,
+        env.contract.address.clone(),
+        "uusd".to_string(),
+    )?;
+    let asset = Asset {
+        info: AssetInfo::NativeToken {
+            denom: "uusd".to_string(),
+        },
+        amount,
+    };
+    Ok(Response::new()
+        .add_message(asset.into_msg(&deps.querier, loan_info.user_address)?)
+        .add_attribute("profit", amount.to_string()))
 }
 
 pub fn query_estimate_arbitrage(

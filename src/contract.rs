@@ -9,12 +9,12 @@ use cw2::set_contract_version;
 use crate::arb_create::{try_arb_create, try_callback_create};
 use crate::arb_redeem::{try_callback_redeem, try_swap_to_ust_and_take_profit};
 use crate::error::ContractError;
-use crate::flash_loan::{query_estimate_arbitrage, try_flash_loan};
+use crate::flash_loan::{query_estimate_arbitrage, try_flash_loan, try_user_profit};
 use crate::msg::{
     ClusterStateResponse, ExecuteMsg, InstantiateMsg, QueryMsg, QueryMsgAstroPort,
     UstVaultAddressResponse,
 };
-use crate::state::{State, LOAN_INFO, STATE};
+use crate::state::{State, STATE};
 
 use astroport::querier::{query_balance, query_token_balance};
 use terraswap::asset::{Asset, AssetInfo};
@@ -171,24 +171,6 @@ pub fn try_update_config(
     };
     STATE.save(deps.storage, &new_state)?;
     Ok(Response::new())
-}
-
-pub fn try_user_profit(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
-    let loan_info = LOAN_INFO.load(deps.storage)?;
-    let amount = query_balance(
-        &deps.querier,
-        env.contract.address.clone(),
-        "uusd".to_string(),
-    )?;
-    let asset = Asset {
-        info: AssetInfo::NativeToken {
-            denom: "uusd".to_string(),
-        },
-        amount,
-    };
-    Ok(Response::new()
-        .add_message(asset.into_msg(&deps.querier, loan_info.user_address)?)
-        .add_attribute("profit", amount.to_string()))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
