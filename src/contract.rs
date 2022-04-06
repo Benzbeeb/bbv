@@ -1,19 +1,13 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{
-    to_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo, QueryRequest, Response, StdResult,
-    WasmQuery,
-};
+use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
 use cw2::set_contract_version;
 
 use crate::arb_create::{try_arb_create, try_callback_create};
 use crate::arb_redeem::{try_callback_redeem, try_swap_to_ust_and_take_profit};
 use crate::error::ContractError;
 use crate::flash_loan::{query_estimate_arbitrage, try_flash_loan, try_user_profit};
-use crate::msg::{
-    ClusterStateResponse, ExecuteMsg, InstantiateMsg, QueryMsg, QueryMsgNebula,
-    UstVaultAddressResponse,
-};
+use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, UstVaultAddressResponse};
 use crate::state::{State, STATE};
 
 use astroport::querier::{query_balance, query_token_balance};
