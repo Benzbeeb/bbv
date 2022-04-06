@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use astroport::asset::Asset;
 
 /// ## Description
-/// This structure stores the basic settings for creating a new incentives contract.
+/// This structure stores the basic settings for creating a new contract.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct InstantiateMsg {
