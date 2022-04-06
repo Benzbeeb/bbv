@@ -1,12 +1,21 @@
 use cosmwasm_std::{coin, to_binary, CosmosMsg, DepsMut, Env, Response, Uint128, WasmMsg};
 
 use crate::error::ContractError;
-use crate::flash_loan::{repay_and_take_profit, swap_to};
+use crate::flash_loan::repay_and_take_profit;
 use crate::msg::{ExecuteMsg, IncentivesMsg};
 use crate::state::{LOAN_INFO, STATE};
+use crate::utils::swap_to;
 
 use astroport::asset::{Asset as AstroportAsset, AssetInfo as AstroportAssetInfo};
 
+/// ## Description
+/// Executes arbitrage on Astroport to get CT and perform the redeem operation with flash loan amout.
+///
+/// ## Params
+/// - **deps** is an object of type [`DepsMut`].
+///
+/// - **env** is an object of type [`Env`].
+///
 pub fn try_callback_redeem(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
     let loan_info = LOAN_INFO.load(deps.storage)?;
@@ -18,6 +27,7 @@ pub fn try_callback_redeem(deps: DepsMut, env: Env) -> Result<Response, Contract
     };
 
     let msgs = vec![
+        // Buy cluster from Astroport and redeem with pro-rata
         CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: state.incentive_addres.to_string(),
             funds: vec![coin(loan_info.amount.u128(), "uusd".to_string())],
@@ -27,6 +37,7 @@ pub fn try_callback_redeem(deps: DepsMut, env: Env) -> Result<Response, Contract
                 min_cluster: Some(Uint128::from(1u128)),
             })?,
         }),
+        // Swap all assets to UST
         CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: env.contract.address.to_string(),
             funds: vec![],
@@ -37,20 +48,28 @@ pub fn try_callback_redeem(deps: DepsMut, env: Env) -> Result<Response, Contract
     Ok(Response::new().add_messages(msgs))
 }
 
+/// ## Description
+/// Sell related tokens with cluster to UST, after that repay and take profit.
+///
+/// ## Params
+/// - **deps** is an object of type [`DepsMut`].
+///
+/// - **env** is an object of type [`Env`].
+///
 pub fn try_swap_to_ust_and_take_profit(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
     let loan_info = LOAN_INFO.load(deps.storage)?;
     let mut messages = vec![];
 
-    let asset_infos: Vec<AstroportAssetInfo> =
-            loan_info
-                    .target
-                    .iter()
-                    .map(|x| x.info.clone())
-                    .filter(|asset_info| {
-                        !matches!(asset_info, AstroportAssetInfo::NativeToken { denom } if denom == "uusd")
-                    })
-                    .collect();
+    let asset_infos: Vec<AstroportAssetInfo> = loan_info
+        .target
+        .iter()
+        .map(|x| x.info.clone())
+        .filter(|asset_info| {
+            // filter native UST
+            !matches!(asset_info, AstroportAssetInfo::NativeToken { denom } if denom == "uusd")
+        })
+        .collect();
 
     for asset_info in asset_infos {
         let asset = AstroportAsset {
@@ -62,6 +81,7 @@ pub fn try_swap_to_ust_and_take_profit(deps: DepsMut, env: Env) -> Result<Respon
             continue;
         }
 
+        // swap asset to UST
         messages.push(swap_to(
             &deps.querier,
             asset,
@@ -72,6 +92,7 @@ pub fn try_swap_to_ust_and_take_profit(deps: DepsMut, env: Env) -> Result<Respon
         )?)
     }
 
+    // repay and take profit
     messages.extend_from_slice(&repay_and_take_profit(
         &deps.querier,
         loan_info.amount,

@@ -2,17 +2,28 @@ use cosmwasm_std::{coin, to_binary, CosmosMsg, DepsMut, Env, Response, Uint128, 
 use cw20::Cw20ExecuteMsg;
 
 use crate::error::ContractError;
-use crate::flash_loan::{repay_and_take_profit, swap_to};
+use crate::flash_loan::repay_and_take_profit;
 use crate::msg::{ExecuteMsg, IncentivesMsg};
 use crate::state::{LOAN_INFO, STATE};
+use crate::utils::swap_to;
 
 use astroport::asset::{Asset as AstroportAsset, AssetInfo as AstroportAssetInfo};
 
+/// ## Description
+/// Prepares assets for create cluster token.
+///
+/// ## Params
+/// - **deps** is an object of type [`DepsMut`].
+///
+/// - **env** is an object of type [`Env`].
+///
 pub fn try_callback_create(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
     let loan_info = LOAN_INFO.load(deps.storage)?;
 
     let total_asset_amount: Uint128 = loan_info.inv.clone().iter().sum();
+
+    // pro-rata: calculate UST that need to swap to assets based on the asset ratio in the current inventory
     let asset_amounts = loan_info
         .inv
         .iter()
@@ -21,6 +32,7 @@ pub fn try_callback_create(deps: DepsMut, env: Env) -> Result<Response, Contract
     let mut messages: Vec<CosmosMsg> = vec![];
     for (asset, amount) in loan_info.target.iter().zip(asset_amounts) {
         if let AstroportAssetInfo::NativeToken { denom } = asset.info.clone() {
+            // skip if asset if `uusd`
             if denom == "uusd" {
                 continue;
             }
@@ -29,7 +41,7 @@ pub fn try_callback_create(deps: DepsMut, env: Env) -> Result<Response, Contract
         if amount.is_zero() {
             continue;
         }
-
+        // swap UST to asset
         messages.push(swap_to(
             &deps.querier,
             AstroportAsset {
@@ -52,6 +64,14 @@ pub fn try_callback_create(deps: DepsMut, env: Env) -> Result<Response, Contract
     Ok(Response::new().add_messages(messages))
 }
 
+/// ## Description
+///  Executes the create operation and uses CT to arbitrage on Astroport with all ralated assets in contract.
+///
+/// ## Params
+/// - **deps** is an object of type [`DepsMut`].
+///
+/// - **env** is an object of type [`Env`].
+///
 pub fn try_arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError> {
     let mut messages: Vec<CosmosMsg> = vec![];
     let state = STATE.load(deps.storage)?;
@@ -62,6 +82,7 @@ pub fn try_arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError
         .iter()
         .map(|asset| AstroportAsset {
             info: asset.info.clone(),
+            // get balance
             amount: asset
                 .info
                 .query_pool(&deps.querier, env.contract.address.clone())
@@ -76,6 +97,7 @@ pub fn try_arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError
                 funds.push(coin(asset.amount.u128(), denom));
             }
             AstroportAssetInfo::Token { contract_addr } => {
+                // increate allowance
                 messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: contract_addr.to_string(),
                     msg: to_binary(&Cw20ExecuteMsg::IncreaseAllowance {
@@ -90,6 +112,7 @@ pub fn try_arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError
         }
     }
 
+    // mint cluster token and sell it on Astroport.
     messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: state.incentive_addres.to_string(),
         msg: to_binary(&IncentivesMsg::ArbClusterCreate {
@@ -100,6 +123,7 @@ pub fn try_arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError
         funds,
     }));
 
+    // repay and take profit
     messages.extend_from_slice(&repay_and_take_profit(
         &deps.querier,
         loan_info.amount,
