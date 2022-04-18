@@ -21,13 +21,18 @@ pub fn try_callback_create(deps: DepsMut, env: Env) -> Result<Response, Contract
     let state = STATE.load(deps.storage)?;
     let loan_info = LOAN_INFO.load(deps.storage)?;
 
-    let total_asset_amount: Uint128 = loan_info.inv.clone().iter().sum();
-
-    // pro-rata: calculate UST that need to swap to assets based on the asset ratio in the current inventory
-    let asset_amounts = loan_info
-        .inv
+    let total_weight_amount: Uint128 = loan_info
+        .target
+        .clone()
         .iter()
-        .map(|&inv| inv * loan_info.amount.clone() / total_asset_amount);
+        .map(|asset| asset.amount)
+        .sum();
+
+    // pro-rata: calculate UST that need to swap to assets based on target weight ratio
+    let asset_amounts = loan_info
+        .target
+        .iter()
+        .map(|asset| asset.amount * loan_info.amount.clone() / total_weight_amount);
 
     let mut messages: Vec<CosmosMsg> = vec![];
     for (asset, amount) in loan_info.target.iter().zip(asset_amounts) {
