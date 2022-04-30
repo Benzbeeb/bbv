@@ -117,6 +117,8 @@ pub fn try_arb_create(deps: DepsMut, env: Env) -> Result<Response, ContractError
         }
     }
 
+    funds.sort_by(|c1, c2| c1.denom.cmp(&c2.denom));
+
     // mint cluster token and sell it on Astroport.
     messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: state.incentive_addres.to_string(),
