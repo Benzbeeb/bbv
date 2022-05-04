@@ -34,8 +34,10 @@ dependencies = [
  "cw-storage-plus",
  "cw2",
  "cw20",
+ "moneymarket",
  "schemars",
  "serde",
+ "terra-cosmwasm",
  "terraswap",
  "thiserror",
  "white-whale",
@@ -439,6 +441,21 @@ name = "libc"
 version = "0.2.99"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7f823d141fe0a24df1e23b4af4e3c7ba9e5966ec514ea068c93024aa7deb765"
+
+[[package]]
+name = "moneymarket"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a80abe43dc97b79401c5c028b8a609e6be81f1d61218578c2372541dcfdbb1f"
+dependencies = [
+ "cosmwasm-bignumber",
+ "cosmwasm-std",
+ "cosmwasm-storage",
+ "cw20",
+ "schemars",
+ "serde",
+ "terra-cosmwasm",
+]
 
 [[package]]
 name = "opaque-debug"

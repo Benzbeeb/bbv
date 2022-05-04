@@ -1,10 +1,12 @@
-pub mod arb_create;
-pub mod arb_redeem;
 pub mod contract;
-mod error;
-pub mod flash_loan;
 pub mod msg;
 pub mod state;
 pub mod utils;
+
+mod error;
+mod execute_arb_create;
+mod execute_arb_redeem;
+mod execute_flash_loan;
+mod query;
 
 pub use crate::error::ContractError;

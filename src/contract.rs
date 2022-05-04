@@ -2,16 +2,15 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
 use cw2::set_contract_version;
+use terra_cosmwasm::TerraMsgWrapper;
 
-use crate::arb_create::{try_arb_create, try_callback_create};
-use crate::arb_redeem::{try_callback_redeem, try_swap_to_ust_and_take_profit};
 use crate::error::ContractError;
-use crate::flash_loan::{query_estimate_arbitrage, try_flash_loan, try_user_profit};
+use crate::execute_arb_create::{try_arb_create, try_callback_create};
+use crate::execute_arb_redeem::{try_callback_redeem, try_swap_to_ust_and_take_profit};
+use crate::execute_flash_loan::{try_flash_loan, try_user_profit};
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, UstVaultAddressResponse};
+use crate::query::query_estimate_arbitrage;
 use crate::state::{State, STATE};
-
-use astroport::querier::{query_balance, query_token_balance};
-use terraswap::asset::{Asset, AssetInfo};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:bbv";
@@ -34,7 +33,7 @@ const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn instantiate(
     deps: DepsMut,
     _env: Env,
-    _info: MessageInfo,
+    info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
     let state = State {
@@ -43,7 +42,11 @@ pub fn instantiate(
         astroport_factory_address: deps
             .api
             .addr_validate(msg.astroport_factory_address.as_str())?,
-        owner_address: deps.api.addr_validate(msg.owner_address.as_str())?,
+        aust_token_address: deps.api.addr_validate(msg.aust_token_address.as_str())?,
+        anchor_market_contract: deps
+            .api
+            .addr_validate(msg.anchor_market_contract.as_str())?,
+        owner_address: info.sender,
     };
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     STATE.save(deps.storage, &state)?;
@@ -65,18 +68,25 @@ pub fn instantiate(
 /// ## Commands
 /// - **ExecuteMsg::FlashLoan { cluster_address
 ///         }** Select a strategy and estimate cost amount to arbitrage.
+///
 /// - **ExecuteMsg::CallbackRedeem {}** Redeem actions to be performed with the loaned funds.
+///
 /// - **ExecuteMsg::CallbackCreate{}** Create actions to be performed with the loaned funds.
+///
 /// - **ExecuteMsg::ArbCreate {}** Increases allowances and sends funds to call ArbClusterCreate.
+///
 /// - **ExecuteMsg::_UserProfit {}** Sends all profit to user.
+///
 /// - **ExecuteMsg::WithdrawNative {
 ///             send_to,
 ///             denom,
 ///         }** Sends all native to send_to.
+///
 /// - **ExecuteMsg::WithdrawToken {
 ///             send_to,
 ///             denom,
 ///         }** Sends all token to send_to.
+///
 /// - **ExecuteMsg::SwapToUstAndTakeProfit {}** Swaps all asset to UST after that take a profit.
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
@@ -84,13 +94,54 @@ pub fn execute(
     env: Env,
     info: MessageInfo,
     msg: ExecuteMsg,
-) -> Result<Response, ContractError> {
+) -> Result<Response<TerraMsgWrapper>, ContractError> {
     match msg {
         ExecuteMsg::FlashLoan { cluster_address } => try_flash_loan(deps, info, cluster_address),
-        ExecuteMsg::CallbackRedeem {} => try_callback_redeem(deps, env),
-        ExecuteMsg::CallbackCreate {} => try_callback_create(deps, env),
-        ExecuteMsg::ArbCreate {} => try_arb_create(deps, env),
-        ExecuteMsg::_UserProfit {} => try_user_profit(deps, env),
+        ExecuteMsg::_CallbackRedeem {
+            cluster_address,
+            user_address,
+            loan_amount,
+            target,
+        } => try_callback_redeem(
+            deps,
+            env,
+            info,
+            cluster_address,
+            user_address,
+            loan_amount,
+            &target,
+        ),
+        ExecuteMsg::_CallbackCreate {
+            cluster_address,
+            user_address,
+            loan_amount,
+            target,
+            prices,
+        } => try_callback_create(
+            deps,
+            env,
+            info,
+            cluster_address,
+            user_address,
+            loan_amount,
+            &target,
+            &prices,
+        ),
+        ExecuteMsg::_ArbCreate {
+            cluster_address,
+            user_address,
+            loan_amount,
+            target,
+        } => try_arb_create(
+            deps,
+            env,
+            info,
+            cluster_address,
+            user_address,
+            loan_amount,
+            &target,
+        ),
+        ExecuteMsg::_UserProfit { user_address } => try_user_profit(deps, env, info, user_address),
         ExecuteMsg::UpdateConfig {
             vault_address,
             incentive_address,
@@ -104,97 +155,12 @@ pub fn execute(
             astroport_factory_address,
             owner_address,
         ),
-        ExecuteMsg::WithdrawNative { send_to, denom } => {
-            try_withdraw_native(deps, env, info, send_to, denom)
-        }
-        ExecuteMsg::WithdrawToken {
-            send_to,
-            contract_address,
-        } => try_withdraw_token(deps, env, info, send_to, contract_address),
-        ExecuteMsg::SwapToUstAndTakeProfit {} => try_swap_to_ust_and_take_profit(deps, env),
+        ExecuteMsg::_SwapToUstAndTakeProfit {
+            user_address,
+            loan_amount,
+            target,
+        } => try_swap_to_ust_and_take_profit(deps, env, info, user_address, loan_amount, &target),
     }
-}
-
-/// ## Description
-/// Send the native token with specific denom to recipient.
-///
-/// ## Params
-/// - **deps** is an object of type [`DepsMut`].
-///
-/// - **env** is an object of type [`Env`].
-///
-/// - **info** is an object of type [`MessageInfo`].
-///
-/// - **send_to** is an object of type [`String`] which is the recipient address.
-///
-/// - **denom** is an object of type [`String`] which is the denom of asset to withdraw.
-///
-/// ## Executor
-/// Only the owner can execute this.
-pub fn try_withdraw_native(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-    send_to: String,
-    denom: String,
-) -> Result<Response, ContractError> {
-    let state = STATE.load(deps.storage)?;
-    if state.owner_address != info.sender {
-        return Err(ContractError::Unauthorized {});
-    }
-    let amount = query_balance(&deps.querier, env.contract.address, denom.clone())?;
-
-    Ok(Response::new().add_message(
-        Asset {
-            info: AssetInfo::NativeToken { denom },
-            amount,
-        }
-        .into_msg(&deps.querier, deps.api.addr_validate(send_to.as_ref())?)?,
-    ))
-}
-
-/// ## Description
-/// Send the token with specific contract address to recipient.
-///
-/// ## Params
-/// - **deps** is an object of type [`DepsMut`].
-///
-/// - **env** is an object of type [`Env`].
-///
-/// - **info** is an object of type [`MessageInfo`].
-///
-/// - **send_to** is an object of type [`String`] which is the recipient address.
-///
-/// - **contract_address** is an object of type [`String`] which is the contract address token of asset to withdraw.
-///
-/// ## Executor
-/// Only the owner can execute this.
-pub fn try_withdraw_token(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-    send_to: String,
-    contract_address: String,
-) -> Result<Response, ContractError> {
-    let state = STATE.load(deps.storage)?;
-    if state.owner_address != info.sender {
-        return Err(ContractError::Unauthorized {});
-    }
-    let amount = query_token_balance(
-        &deps.querier,
-        env.contract.address,
-        deps.api.addr_validate(contract_address.as_ref())?,
-    )?;
-
-    Ok(Response::new().add_message(
-        Asset {
-            info: AssetInfo::Token {
-                contract_addr: contract_address,
-            },
-            amount,
-        }
-        .into_msg(&deps.querier, deps.api.addr_validate(send_to.as_ref())?)?,
-    ))
 }
 
 /// ## Description
@@ -225,10 +191,10 @@ pub fn try_update_config(
     incentive_addres: Option<String>,
     astroport_factory_address: Option<String>,
     owner_address: Option<String>,
-) -> Result<Response, ContractError> {
+) -> Result<Response<TerraMsgWrapper>, ContractError> {
     let mut state = STATE.load(deps.storage)?;
 
-    if state.owner_address.clone() != info.sender {
+    if info.sender != state.owner_address {
         return Err(ContractError::Unauthorized {});
     }
 

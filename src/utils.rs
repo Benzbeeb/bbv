@@ -1,16 +1,19 @@
 use cosmwasm_std::{
-    coin, to_binary, Addr, CosmosMsg, Deps, QuerierWrapper, QueryRequest, StdResult, WasmMsg,
-    WasmQuery,
+    coin, to_binary, Addr, CosmosMsg, Deps, QuerierWrapper, QueryRequest, StdResult, Uint128,
+    WasmMsg, WasmQuery,
 };
 
 use cw20::Cw20ExecuteMsg;
 
 use crate::msg::{ClusterStateResponse, QueryMsgNebula};
 
+use terra_cosmwasm::{create_swap_msg, TerraMsgWrapper};
+
 use astroport::asset::{Asset as AstroportAsset, AssetInfo as AstroportAssetInfo};
 use astroport::pair::{Cw20HookMsg as AstroportCw20HookMsg, ExecuteMsg as AstroportExecuteMsg};
 use astroport::querier::query_pair_info;
 
+use moneymarket::market::{Cw20HookMsg as AnchorCw20HookMsg, ExecuteMsg as AnchorExecuteMsg};
 /// ## Description
 /// Swap token from Astroport pool
 ///
@@ -23,12 +26,12 @@ use astroport::querier::query_pair_info;
 ///
 /// - **astroport_factory_address** is an object of type [`Addr`].
 ///
-pub fn swap_to(
+pub fn create_astroport_swap_msg(
     querier: &QuerierWrapper,
     offer_asset: AstroportAsset,
     to_asset: AstroportAssetInfo,
     astroport_factory_address: Addr,
-) -> StdResult<CosmosMsg> {
+) -> StdResult<CosmosMsg<TerraMsgWrapper>> {
     // query pair contract
     let pair_contract = query_pair_info(
         querier,
@@ -38,7 +41,7 @@ pub fn swap_to(
     .contract_addr
     .to_string();
 
-    match offer_asset.clone().info {
+    match offer_asset.info.clone() {
         AstroportAssetInfo::Token { contract_addr } => {
             let message = CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: contract_addr.to_string(),
@@ -66,9 +69,44 @@ pub fn swap_to(
                 })?,
                 funds: vec![coin(offer_asset.amount.u128(), denom)],
             });
-            return Ok(message);
+            Ok(message)
         }
     }
+}
+
+pub fn create_terraswap_swap_msg(
+    offer_amount: u128,
+    offer_denom: String,
+    to_denom: String,
+) -> StdResult<CosmosMsg<TerraMsgWrapper>> {
+    let message = create_swap_msg(coin(offer_amount, offer_denom), to_denom);
+    Ok(message)
+}
+
+pub fn create_aust_swap_msg(
+    anchor_market_contract: Addr,
+    aust_contract_contract: Addr,
+    amount: Uint128,
+    to_ust: bool,
+) -> StdResult<CosmosMsg<TerraMsgWrapper>> {
+    let message = if to_ust {
+        WasmMsg::Execute {
+            contract_addr: aust_contract_contract.to_string(),
+            msg: to_binary(&Cw20ExecuteMsg::Send {
+                contract: anchor_market_contract.to_string(),
+                amount,
+                msg: to_binary(&AnchorCw20HookMsg::RedeemStable {})?,
+            })?,
+            funds: vec![],
+        }
+    } else {
+        WasmMsg::Execute {
+            contract_addr: anchor_market_contract.to_string(),
+            msg: to_binary(&AnchorExecuteMsg::DepositStable {})?,
+            funds: vec![coin(amount.u128(), "uusd")],
+        }
+    };
+    Ok(CosmosMsg::Wasm(message))
 }
 
 /// ## Description

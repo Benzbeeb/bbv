@@ -2,7 +2,7 @@ use cosmwasm_std::{Addr, Decimal, Uint128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use astroport::asset::Asset;
+use astroport::asset::Asset as AstroportAsset;
 
 /// ## Description
 /// This structure stores the basic settings for creating a new contract.
@@ -12,7 +12,8 @@ pub struct InstantiateMsg {
     pub vault_address: String,
     pub incentive_address: String,
     pub astroport_factory_address: String,
-    pub owner_address: String,
+    pub aust_token_address: String,
+    pub anchor_market_contract: String,
 }
 
 /// ## Description
@@ -30,15 +31,35 @@ pub enum ExecuteMsg {
         cluster_address: String,
     },
     /// Executes arbitrage on Astroport to get CT and perform the redeem operation with flash loan amout.
-    CallbackRedeem {},
+    _CallbackRedeem {
+        cluster_address: Addr,
+        user_address: Addr,
+        loan_amount: Uint128,
+        target: Vec<AstroportAsset>,
+    },
     /// Prepares assets for create cluster token.
-    CallbackCreate {},
+    _CallbackCreate {
+        cluster_address: Addr,
+        user_address: Addr,
+        loan_amount: Uint128,
+        target: Vec<AstroportAsset>,
+        prices: Vec<String>,
+    },
     /// Sends all of profit to user
-    _UserProfit {},
+    _UserProfit { user_address: Addr },
     ///  Executes the create operation and uses CT to arbitrage on Astroport with all ralated assets in contract.
-    ArbCreate {},
+    _ArbCreate {
+        cluster_address: Addr,
+        user_address: Addr,
+        loan_amount: Uint128,
+        target: Vec<AstroportAsset>,
+    },
     /// Swap token to UST from Astroport pool
-    SwapToUstAndTakeProfit {},
+    _SwapToUstAndTakeProfit {
+        user_address: Addr,
+        loan_amount: Uint128,
+        target: Vec<AstroportAsset>,
+    },
 
     /////////////////////
     /// OWNER CALLABLE
@@ -54,20 +75,6 @@ pub enum ExecuteMsg {
         /// Address to claim the contract ownership
         owner_address: Option<String>,
     },
-    /// Send the native token with specific denom to recipient.
-    WithdrawNative {
-        /// recipient address
-        send_to: String,
-        /// demom of native token
-        denom: String,
-    },
-    /// Send the token with specific contract address to recipient.
-    WithdrawToken {
-        /// recipient address
-        send_to: String,
-        /// contract address of CW20 token
-        contract_address: String,
-    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -78,7 +85,7 @@ pub enum IncentivesMsg {
         /// cluster contract
         cluster_contract: String,
         /// UST amount
-        asset: Asset,
+        asset: AstroportAsset,
         /// minimum returned cluster tokens when arbitraging
         min_cluster: Option<Uint128>,
     },
@@ -87,7 +94,7 @@ pub enum IncentivesMsg {
         /// cluster contract
         cluster_contract: String,
         /// assets offerred for minting
-        assets: Vec<Asset>,
+        assets: Vec<AstroportAsset>,
         /// minimum returned UST when arbitraging
         min_ust: Option<Uint128>,
     },
@@ -120,7 +127,7 @@ pub struct EstimateArbitrageResponse {
     /// Current inventory / asset balances
     pub inv: Vec<Uint128>,
     /// The current asset target weights
-    pub target: Vec<Asset>,
+    pub target: Vec<AstroportAsset>,
     /// Prices of the assets in the cluster
     pub prices: Vec<String>,
 }
@@ -138,7 +145,7 @@ pub struct ClusterStateResponse {
     /// Cluster token address
     pub cluster_token: String,
     /// The current asset target weights
-    pub target: Vec<Asset>,
+    pub target: Vec<AstroportAsset>,
     /// The address of this cluster contract
     pub cluster_contract_address: String,
     /// The cluster active status - not active if decommissioned

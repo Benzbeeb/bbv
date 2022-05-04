@@ -16,6 +16,8 @@ pub struct State {
     pub vault_address: Addr,
     pub incentive_addres: Addr,
     pub astroport_factory_address: Addr,
+    pub aust_token_address: Addr,
+    pub anchor_market_contract: Addr,
     pub owner_address: Addr,
 }
 
@@ -36,4 +38,4 @@ pub struct LoanInfo {
 }
 
 pub const STATE: Item<State> = Item::new("state");
-pub const LOAN_INFO: Item<LoanInfo> = Item::new("loan_info");
+// pub const LOAN_INFO: Item<LoanInfo> = Item::new("loan_info");
