@@ -44,17 +44,19 @@ pub fn try_flash_loan(
         ExecuteMsg::_CallbackRedeem {
             user_address,
             loan_amount: estimate.arbitrage_cost,
-            cluster_address: validated_cluster_address.clone(),
+            cluster_address: validated_cluster_address,
             target: estimate.target,
+            profit_threshold: state.profit_threshold,
         }
     } else {
         // mint CT and sell on Astroport
         ExecuteMsg::_CallbackCreate {
             user_address,
             loan_amount: estimate.arbitrage_cost,
-            cluster_address: validated_cluster_address.clone(),
+            cluster_address: validated_cluster_address,
             target: estimate.target,
             prices: estimate.prices,
+            profit_threshold: state.profit_threshold,
         }
     };
 
@@ -101,6 +103,7 @@ pub fn repay_and_take_profit(
     contract_address: Addr,
     vault_address: Addr,
     user_address: Addr,
+    profit_threshold: Uint128,
 ) -> StdResult<Vec<CosmosMsg<TerraMsgWrapper>>> {
     let mut messages = vec![];
 
@@ -121,7 +124,10 @@ pub fn repay_and_take_profit(
     // take profit
     messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: contract_address.to_string(),
-        msg: to_binary(&ExecuteMsg::_UserProfit { user_address })?,
+        msg: to_binary(&ExecuteMsg::_UserProfit {
+            user_address,
+            profit_threshold,
+        })?,
         funds: vec![],
     }));
 
@@ -140,26 +146,27 @@ pub fn try_user_profit(
     env: Env,
     info: MessageInfo,
     user_address: Addr,
+    profit_threshold: Uint128,
 ) -> Result<Response<TerraMsgWrapper>, ContractError> {
     if info.sender != env.contract.address {
         return Err(ContractError::Unauthorized {});
     }
 
-    let amount = query_balance(
-        &deps.querier,
-        env.contract.address.clone(),
-        "uusd".to_string(),
-    )?;
-    let asset = Asset {
-        info: AssetInfo::NativeToken {
-            denom: "uusd".to_string(),
-        },
-        amount,
-    };
+    let amount = query_balance(&deps.querier, env.contract.address, "uusd".to_string())?;
+    if amount < profit_threshold {
+        return Err(ContractError::InsufficientProfit {});
+    }
+
     Ok(Response::new()
         .add_message(CosmosMsg::Bank(BankMsg::Send {
             to_address: user_address.to_string(),
-            amount: vec![asset.deduct_tax(&deps.querier)?],
+            amount: vec![Asset {
+                info: AssetInfo::NativeToken {
+                    denom: "uusd".to_string(),
+                },
+                amount,
+            }
+            .deduct_tax(&deps.querier)?],
         }))
         .add_attribute("profit", amount.to_string()))
 }

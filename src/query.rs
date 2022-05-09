@@ -51,7 +51,7 @@ pub fn estimate_arbitrage(
         .inv
         .iter()
         .zip(cluster_state.prices.iter())
-        .map(|(i, p)| (Decimal::from_str(p.as_str()).unwrap()) * i.clone())
+        .map(|(i, p)| (Decimal::from_str(p.as_str()).unwrap()) * *i)
         .sum::<Uint128>();
 
     // query pool info
@@ -73,7 +73,7 @@ pub fn estimate_arbitrage(
     let assets = pool_info.query_pools(&deps.querier, pool_info.contract_addr.clone())?;
 
     // get UST amount and CT amount
-    let (ust_amt, ct_amt) = match assets.clone()[0].info {
+    let (ust_amt, ct_amt) = match assets[0].info {
         AstroportAssetInfo::NativeToken { .. } => (assets[0].amount, assets[1].amount),
         AstroportAssetInfo::Token { .. } => (assets[1].amount, assets[0].amount),
     };

@@ -1,6 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
+use cosmwasm_std::{
+    to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint128,
+};
 use cw2::set_contract_version;
 use terra_cosmwasm::TerraMsgWrapper;
 
@@ -46,6 +48,7 @@ pub fn instantiate(
         anchor_market_contract: deps
             .api
             .addr_validate(msg.anchor_market_contract.as_str())?,
+        profit_threshold: msg.profit_threshold,
         owner_address: info.sender,
     };
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
@@ -105,6 +108,7 @@ pub fn execute(
             user_address,
             loan_amount,
             target,
+            profit_threshold,
         } => try_callback_redeem(
             deps,
             env,
@@ -113,6 +117,7 @@ pub fn execute(
             user_address,
             loan_amount,
             &target,
+            profit_threshold,
         ),
         ExecuteMsg::_CallbackCreate {
             cluster_address,
@@ -120,6 +125,7 @@ pub fn execute(
             loan_amount,
             target,
             prices,
+            profit_threshold,
         } => try_callback_create(
             deps,
             env,
@@ -129,12 +135,14 @@ pub fn execute(
             loan_amount,
             &target,
             &prices,
+            profit_threshold,
         ),
         ExecuteMsg::_ArbCreate {
             cluster_address,
             user_address,
             loan_amount,
             target,
+            profit_threshold,
         } => try_arb_create(
             deps,
             env,
@@ -143,12 +151,17 @@ pub fn execute(
             user_address,
             loan_amount,
             &target,
+            profit_threshold,
         ),
-        ExecuteMsg::_UserProfit { user_address } => try_user_profit(deps, env, info, user_address),
+        ExecuteMsg::_UserProfit {
+            user_address,
+            profit_threshold,
+        } => try_user_profit(deps, env, info, user_address, profit_threshold),
         ExecuteMsg::UpdateConfig {
             vault_address,
             incentive_address,
             astroport_factory_address,
+            profit_threshold,
             owner_address,
         } => try_update_config(
             deps,
@@ -156,13 +169,23 @@ pub fn execute(
             vault_address,
             incentive_address,
             astroport_factory_address,
+            profit_threshold,
             owner_address,
         ),
         ExecuteMsg::_SwapToUstAndTakeProfit {
             user_address,
             loan_amount,
             target,
-        } => try_swap_to_ust_and_take_profit(deps, env, info, user_address, loan_amount, &target),
+            profit_threshold,
+        } => try_swap_to_ust_and_take_profit(
+            deps,
+            env,
+            info,
+            user_address,
+            loan_amount,
+            &target,
+            profit_threshold,
+        ),
     }
 }
 
@@ -183,6 +206,9 @@ pub fn execute(
 /// - **astroport_factory_address** is an object of type [`Option<String>`] which is the address of
 ///     the new astroport factory contract.
 ///
+/// - **profit_threshold** is an object of type [`Option<Uint128>`] which is the new threshold of
+///     the arbitrage profit.
+///
 /// - **owner_address** is an object of type [`Option<String>`] which is a new owner address to update.
 ///
 /// ## Executor
@@ -193,6 +219,7 @@ pub fn try_update_config(
     vault_address: Option<String>,
     incentive_addres: Option<String>,
     astroport_factory_address: Option<String>,
+    profit_threshold: Option<Uint128>,
     owner_address: Option<String>,
 ) -> Result<Response<TerraMsgWrapper>, ContractError> {
     let mut state = STATE.load(deps.storage)?;
@@ -210,6 +237,9 @@ pub fn try_update_config(
     if let Some(astroport_factory_address) = astroport_factory_address {
         state.astroport_factory_address =
             deps.api.addr_validate(astroport_factory_address.as_ref())?;
+    }
+    if let Some(profit_threshold) = profit_threshold {
+        state.profit_threshold = profit_threshold;
     }
     if let Some(owner_address) = owner_address {
         state.owner_address = deps.api.addr_validate(owner_address.as_str())?;

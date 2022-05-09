@@ -18,6 +18,7 @@ pub struct State {
     pub astroport_factory_address: Addr,
     pub aust_token_address: Addr,
     pub anchor_market_contract: Addr,
+    pub profit_threshold: Uint128,
     pub owner_address: Addr,
 }
 

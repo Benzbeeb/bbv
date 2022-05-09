@@ -22,7 +22,7 @@ use std::str::FromStr;
 /// - **deps** is an object of type [`DepsMut`].
 ///
 /// - **env** is an object of type [`Env`].
-///
+#[allow(clippy::too_many_arguments)]
 pub fn try_callback_create(
     deps: DepsMut,
     env: Env,
@@ -32,6 +32,7 @@ pub fn try_callback_create(
     loan_amount: Uint128,
     target: &[AstroportAsset],
     prices: &[String],
+    profit_threshold: Uint128,
 ) -> Result<Response<TerraMsgWrapper>, ContractError> {
     let state = STATE.load(deps.storage)?;
 
@@ -60,7 +61,7 @@ pub fn try_callback_create(
             continue;
         }
 
-        let asset_amount = loan_amount.clone() * value_weight / total_value_weight;
+        let asset_amount = loan_amount * value_weight / total_value_weight;
 
         messages.push(match asset_info.clone() {
             AstroportAssetInfo::NativeToken { denom } => {
@@ -103,6 +104,7 @@ pub fn try_callback_create(
             user_address,
             loan_amount,
             target: target.to_vec(),
+            profit_threshold,
         })?,
     }));
 
@@ -116,7 +118,7 @@ pub fn try_callback_create(
 /// - **deps** is an object of type [`DepsMut`].
 ///
 /// - **env** is an object of type [`Env`].
-///
+#[allow(clippy::too_many_arguments)]
 pub fn try_arb_create(
     deps: DepsMut,
     env: Env,
@@ -125,6 +127,7 @@ pub fn try_arb_create(
     user_address: Addr,
     loan_amount: Uint128,
     target: &[AstroportAsset],
+    profit_threshold: Uint128,
 ) -> Result<Response<TerraMsgWrapper>, ContractError> {
     let state = STATE.load(deps.storage)?;
 
@@ -184,9 +187,10 @@ pub fn try_arb_create(
     messages.append(&mut repay_and_take_profit(
         &deps.querier,
         loan_amount,
-        env.contract.address.clone(),
+        env.contract.address,
         state.vault_address,
         user_address,
+        profit_threshold,
     )?);
 
     Ok(Response::new().add_messages(messages))

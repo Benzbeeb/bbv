@@ -19,6 +19,7 @@ use terra_cosmwasm::TerraMsgWrapper;
 /// - **deps** is an object of type [`DepsMut`].
 ///
 /// - **env** is an object of type [`Env`].
+#[allow(clippy::too_many_arguments)]
 pub fn try_callback_redeem(
     deps: DepsMut,
     env: Env,
@@ -27,6 +28,7 @@ pub fn try_callback_redeem(
     user_address: Addr,
     loan_amount: Uint128,
     target: &[AstroportAsset],
+    profit_threshold: Uint128,
 ) -> Result<Response<TerraMsgWrapper>, ContractError> {
     let state = STATE.load(deps.storage)?;
 
@@ -38,7 +40,7 @@ pub fn try_callback_redeem(
         info: AstroportAssetInfo::NativeToken {
             denom: "uusd".to_string(),
         },
-        amount: loan_amount.clone(),
+        amount: loan_amount,
     };
 
     let msgs = vec![
@@ -60,6 +62,7 @@ pub fn try_callback_redeem(
                 user_address,
                 loan_amount,
                 target: target.to_vec(),
+                profit_threshold,
             })?,
         }),
     ];
@@ -82,6 +85,7 @@ pub fn try_swap_to_ust_and_take_profit(
     user_address: Addr,
     loan_amount: Uint128,
     target: &[AstroportAsset],
+    profit_threshold: Uint128,
 ) -> Result<Response<TerraMsgWrapper>, ContractError> {
     let state = STATE.load(deps.storage)?;
 
@@ -146,6 +150,7 @@ pub fn try_swap_to_ust_and_take_profit(
         env.contract.address,
         state.vault_address,
         user_address,
+        profit_threshold,
     )?);
 
     Ok(Response::new().add_messages(messages))

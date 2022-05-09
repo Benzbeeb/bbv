@@ -14,6 +14,7 @@ pub struct InstantiateMsg {
     pub astroport_factory_address: String,
     pub aust_token_address: String,
     pub anchor_market_contract: String,
+    pub profit_threshold: Uint128,
 }
 
 /// ## Description
@@ -42,6 +43,8 @@ pub enum ExecuteMsg {
         loan_amount: Uint128,
         /// Cluster target
         target: Vec<AstroportAsset>,
+        /// Threshold of arbitrage profit,
+        profit_threshold: Uint128,
     },
     /// Prepares assets for create cluster token.
     _CallbackCreate {
@@ -55,9 +58,16 @@ pub enum ExecuteMsg {
         target: Vec<AstroportAsset>,
         /// Cluster asset price
         prices: Vec<String>,
+        /// Threshold of arbitrage profit,
+        profit_threshold: Uint128,
     },
     /// Sends all of profit to user
-    _UserProfit { user_address: Addr },
+    _UserProfit {
+        /// Address to send profit to
+        user_address: Addr,
+        /// Threshold of arbitrage profit,
+        profit_threshold: Uint128,
+    },
     ///  Executes the create operation and uses CT to arbitrage on Astroport with all ralated assets in contract.
     _ArbCreate {
         /// Cluster contract address
@@ -68,6 +78,8 @@ pub enum ExecuteMsg {
         loan_amount: Uint128,
         /// Cluster target
         target: Vec<AstroportAsset>,
+        /// Threshold of arbitrage profit,
+        profit_threshold: Uint128,
     },
     /// Swap token to UST from Astroport pool
     _SwapToUstAndTakeProfit {
@@ -77,6 +89,8 @@ pub enum ExecuteMsg {
         loan_amount: Uint128,
         /// Cluster target
         target: Vec<AstroportAsset>,
+        /// Threshold of arbitrage profit,
+        profit_threshold: Uint128,
     },
 
     /////////////////////
@@ -90,6 +104,8 @@ pub enum ExecuteMsg {
         incentive_address: Option<String>,
         /// Astroport factory contract address
         astroport_factory_address: Option<String>,
+        /// Threshold of arbitrage profit
+        profit_threshold: Option<Uint128>,
         /// Address to claim the contract ownership
         owner_address: Option<String>,
     },
