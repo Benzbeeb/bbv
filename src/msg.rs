@@ -29,35 +29,53 @@ pub enum ExecuteMsg {
     FlashLoan {
         /// Cluster contract address
         cluster_address: String,
+        /// Address to send profit to
+        user_address: Option<String>,
     },
     /// Executes arbitrage on Astroport to get CT and perform the redeem operation with flash loan amout.
     _CallbackRedeem {
+        /// Cluster contract address
         cluster_address: Addr,
+        /// Address to send profit to
         user_address: Addr,
+        /// Flash loan amount
         loan_amount: Uint128,
+        /// Cluster target
         target: Vec<AstroportAsset>,
     },
     /// Prepares assets for create cluster token.
     _CallbackCreate {
+        /// Cluster contract address
         cluster_address: Addr,
+        /// Address to send profit to
         user_address: Addr,
+        /// Flash loan amount
         loan_amount: Uint128,
+        /// Cluster asset target
         target: Vec<AstroportAsset>,
+        /// Cluster asset price
         prices: Vec<String>,
     },
     /// Sends all of profit to user
     _UserProfit { user_address: Addr },
     ///  Executes the create operation and uses CT to arbitrage on Astroport with all ralated assets in contract.
     _ArbCreate {
+        /// Cluster contract address
         cluster_address: Addr,
+        /// Address to send profit to
         user_address: Addr,
+        /// Flash loan amount
         loan_amount: Uint128,
+        /// Cluster target
         target: Vec<AstroportAsset>,
     },
     /// Swap token to UST from Astroport pool
     _SwapToUstAndTakeProfit {
+        /// Address to send profit to
         user_address: Addr,
+        /// Flash loan amount
         loan_amount: Uint128,
+        /// Cluster target
         target: Vec<AstroportAsset>,
     },
 

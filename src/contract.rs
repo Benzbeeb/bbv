@@ -96,7 +96,10 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response<TerraMsgWrapper>, ContractError> {
     match msg {
-        ExecuteMsg::FlashLoan { cluster_address } => try_flash_loan(deps, info, cluster_address),
+        ExecuteMsg::FlashLoan {
+            cluster_address,
+            user_address,
+        } => try_flash_loan(deps, info, cluster_address, user_address),
         ExecuteMsg::_CallbackRedeem {
             cluster_address,
             user_address,

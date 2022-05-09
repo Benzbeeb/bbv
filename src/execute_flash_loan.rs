@@ -28,15 +28,21 @@ pub fn try_flash_loan(
     deps: DepsMut,
     info: MessageInfo,
     cluster_address: String,
+    user_address: Option<String>,
 ) -> Result<Response<TerraMsgWrapper>, ContractError> {
     let state = STATE.load(deps.storage)?;
     let validated_cluster_address = deps.api.addr_validate(cluster_address.as_str())?;
+    let user_address = match user_address {
+        Some(addr) => deps.api.addr_validate(addr.as_str())?,
+        None => info.sender,
+    };
+
     let estimate = estimate_arbitrage(deps.as_ref(), cluster_address, &state)?;
 
     let callback = if estimate.market_price < estimate.intrinsic_price {
         // buy CT from Astroport and redeem
         ExecuteMsg::_CallbackRedeem {
-            user_address: info.sender,
+            user_address,
             loan_amount: estimate.arbitrage_cost,
             cluster_address: validated_cluster_address.clone(),
             target: estimate.target,
@@ -44,7 +50,7 @@ pub fn try_flash_loan(
     } else {
         // mint CT and sell on Astroport
         ExecuteMsg::_CallbackCreate {
-            user_address: info.sender,
+            user_address,
             loan_amount: estimate.arbitrage_cost,
             cluster_address: validated_cluster_address.clone(),
             target: estimate.target,
